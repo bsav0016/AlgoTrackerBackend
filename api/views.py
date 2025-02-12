@@ -13,13 +13,13 @@ class UserRegistrationView(APIView):
             serializer = UserRegistrationSerializer(data=request.data)
             if serializer.is_valid():
                 user = serializer.save()
-                tokens = AuthService.create_tokens(user)
+                tokens = AuthService.create_tokens(user=user)
 
-                serialized_user = CustomUserSerializer(user)
+                user_data = CustomUserSerializer(user).data
                 return Response({
-                        "user": serialized_user.data,
+                        **user_data,
                         "refresh_token": tokens['refresh'],
-                        "access_token": tokens['access']
+                        "access_token": tokens['access'],
                     },
                     status=status.HTTP_201_CREATED
                 )
@@ -37,19 +37,16 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.validate(data=request.data)
-            tokens = AuthService.create_tokens(user)
+            tokens = AuthService.create_tokens(user=user)
+            user_data = CustomUserSerializer(user).data
 
             return Response({
-                "username": user.username,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "email": user.email,
-                "strategies": user.strategies,
-                "account_funds": user.account_funds,
-                "free_backtests": user.free_backtests,
-                "refresh_token": tokens['refresh'],
-                "access_token": tokens['access'],
-            }, status=status.HTTP_200_OK)
+                    **user_data,
+                    "refresh_token": tokens['refresh'],
+                    "access_token": tokens['access'],
+                },
+                status=status.HTTP_200_OK
+            )
         return Response({"detail": "Invalid credentials."}, status=status.HTTP_400_BAD_REQUEST)
 
 

@@ -54,13 +54,22 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
         return self.username
 
 
+class Signal(models.Model):
+    indicator = models.CharField(max_length=50)
+    target_value = models.DecimalField(max_digits=10, decimal_places=2)
+    above_target = models.BooleanField()
+
+    def __str__(self):
+        return f"{self.indicator} {'>' if self.above_target else '<'} {self.target_value}"
+
+
 class Strategy(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="strategies")
     symbol = models.CharField(max_length=20)
-    candle_length = models.IntegerField()
-    buy_signals = models.JSONField()
-    sell_signals = models.JSONField()
-    initial_investment = models.DecimalField(max_digits=12, decimal_places=2)
+    candle_length = models.CharField(max_length=10)
+    buy_signals = models.ManyToManyField(Signal, related_name="buy_strategies", blank=True)
+    sell_signals = models.ManyToManyField(Signal, related_name="sell_strategies", blank=True)
+    initial_investment = models.DecimalField(max_digits=30, decimal_places=2)
     estimated_return = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
 
 
@@ -81,12 +90,6 @@ class Backtest(models.Model):
     start_date = models.DateTimeField()
     end_date = models.DateTimeField()
     stock_values = models.ManyToManyField(StockValue)
-
-
-class Signal(models.Model):
-    indicator = models.CharField(max_length=50)
-    target_value = models.DecimalField(max_digits=10, decimal_places=2)
-    above_target = models.BooleanField()
 
 
 class IndicatorValue(models.Model):
