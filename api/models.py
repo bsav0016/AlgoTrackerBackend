@@ -58,9 +58,10 @@ class Signal(models.Model):
     indicator = models.CharField(max_length=50)
     target_value = models.DecimalField(max_digits=10, decimal_places=2)
     above_target = models.BooleanField()
+    parameters = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
-        return f"{self.indicator} {'>' if self.above_target else '<'} {self.target_value}"
+        return f"{self.indicator} {'>' if self.above_target else '<'} {self.target_value} {self.parameters}"
 
 
 class Strategy(models.Model):
@@ -69,7 +70,6 @@ class Strategy(models.Model):
     candle_length = models.CharField(max_length=10)
     buy_signals = models.ManyToManyField(Signal, related_name="buy_strategies", blank=True)
     sell_signals = models.ManyToManyField(Signal, related_name="sell_strategies", blank=True)
-    initial_investment = models.DecimalField(max_digits=30, decimal_places=2)
     estimated_return = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
 
 

@@ -5,9 +5,19 @@ from .models import CustomUser, Strategy, Signal, Trade, StockValue
 
 
 class SignalSerializer(serializers.ModelSerializer):
+    parameters = serializers.JSONField()
+
+    def validate_parameters(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Parameters must be a dictionary.")
+        for key, val in value.items():
+            if not isinstance(val, (int, float)):  # Ensure numbers only
+                raise serializers.ValidationError(f"Invalid parameter value for {key}: must be a number.")
+        return value
+
     class Meta:
         model = Signal
-        fields = ['id', 'indicator', 'target_value', 'above_target']
+        fields = ['id', 'indicator', 'target_value', 'above_target', 'parameters']
 
 
 class TradeSerializer(serializers.ModelSerializer):
@@ -34,8 +44,7 @@ class StrategySerializer(serializers.ModelSerializer):
     class Meta:
         model = Strategy
         fields = [
-            'id', 'symbol', 'candle_length', 'buy_signals', 'sell_signals',
-            'initial_investment', 'estimated_return', 'trades'
+            'id', 'symbol', 'candle_length', 'buy_signals', 'sell_signals', 'estimated_return', 'trades'
         ]
 
 
