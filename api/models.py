@@ -67,12 +67,15 @@ class Signal(models.Model):
 class Strategy(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="strategies")
     symbol = models.CharField(max_length=20)
-    candle_length = models.CharField(max_length=10)
+    interval = models.CharField(max_length=10)
     buy_signals = models.ManyToManyField(Signal, related_name="buy_strategies", blank=True)
     sell_signals = models.ManyToManyField(Signal, related_name="sell_strategies", blank=True)
-    estimated_return = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    estimated_return = models.DecimalField(default=1, max_digits=12, decimal_places=2, null=True, blank=True)
+    analyzing_flag = models.BooleanField(default=True)
+    candles = models.JSONField(default=list)
 
 
+#TODO: Verify whether we need this
 class StockValue(models.Model):
     symbol = models.CharField(max_length=20)
     date = models.DateTimeField()
@@ -85,6 +88,7 @@ class Trade(models.Model):
     is_buy = models.BooleanField()
 
 
+#TODO: Verify if we need this
 class Backtest(models.Model):
     strategy = models.ForeignKey(Strategy, on_delete=models.CASCADE, related_name="backtests")
     start_date = models.DateTimeField()
@@ -92,6 +96,7 @@ class Backtest(models.Model):
     stock_values = models.ManyToManyField(StockValue)
 
 
+#TODO: Verify if we need this
 class IndicatorValue(models.Model):
     indicator = models.CharField(max_length=50)
     date = models.DateTimeField()

@@ -1,23 +1,7 @@
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from django.contrib.auth import authenticate
-from .models import CustomUser, Strategy, Signal, Trade, StockValue
-
-
-class SignalSerializer(serializers.ModelSerializer):
-    parameters = serializers.JSONField()
-
-    def validate_parameters(self, value):
-        if not isinstance(value, dict):
-            raise serializers.ValidationError("Parameters must be a dictionary.")
-        for key, val in value.items():
-            if not isinstance(val, (int, float)):  # Ensure numbers only
-                raise serializers.ValidationError(f"Invalid parameter value for {key}: must be a number.")
-        return value
-
-    class Meta:
-        model = Signal
-        fields = ['id', 'indicator', 'target_value', 'above_target', 'parameters']
+from api.models import CustomUser, Strategy, Trade
 
 
 class TradeSerializer(serializers.ModelSerializer):
@@ -35,6 +19,17 @@ class TradeSerializer(serializers.ModelSerializer):
         }
 
 
+class SignalSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=100)
+    above_target = serializers.BooleanField()
+    buy_signal = serializers.BooleanField()
+    target_value = serializers.FloatField()
+    window = serializers.IntegerField(required=False, allow_null=True)
+    fast_window = serializers.IntegerField(required=False, allow_null=True)
+    slow_window = serializers.IntegerField(required=False, allow_null=True)
+    signal_window = serializers.IntegerField(required=False, allow_null=True)
+
+
 class StrategySerializer(serializers.ModelSerializer):
     """Serializer for Strategies, including buy/sell signals and trades"""
     buy_signals = SignalSerializer(many=True, read_only=True)
@@ -44,7 +39,7 @@ class StrategySerializer(serializers.ModelSerializer):
     class Meta:
         model = Strategy
         fields = [
-            'id', 'symbol', 'candle_length', 'buy_signals', 'sell_signals', 'estimated_return', 'trades'
+            'id', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'estimated_return', 'trades'
         ]
 
 
@@ -102,7 +97,21 @@ class CustomUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
         fields = [
-            'id', 'username', 'first_name', 'last_name', 'email', 'account_funds',
+            'id', 'username', 'first_name', 'last_name', 'email', 'account_funds', 'account_created',
             'free_backtests', 'strategies'
         ]
         read_only_fields = ['id', 'account_created', 'is_staff']
+
+
+class BacktestRequestSerializer(serializers.Serializer):
+    symbol = serializers.CharField(max_length=50)
+    interval = serializers.CharField(max_length=10)
+    start_date = serializers.DateTimeField()
+    end_date = serializers.DateTimeField()
+    signals = SignalSerializer(many=True)
+
+
+class StrategyRequestSerializer(serializers.Serializer):
+    symbol = serializers.CharField(max_length=50)
+    interval = serializers.CharField(max_length=10)
+    signals = SignalSerializer(many=True)

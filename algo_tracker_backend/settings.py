@@ -13,6 +13,7 @@ import os
 import dj_database_url
 from datetime import timedelta
 from pathlib import Path
+from dotenv import load_dotenv
 
 if "DYNO" in os.environ and "CI" not in os.environ:
     DEV_ENV = False
@@ -32,9 +33,13 @@ SECRET_KEY = 'django-insecure-$c0ckx+s-nbth5+@dx720@=mlr-kg3yq&4%2(zn!faq@g@b=w_
 if DEV_ENV:
     DEBUG = True
     ALLOWED_HOSTS = ["localhost", "127.0.0.1", "192.168.1.144"]
+    env_path = BASE_DIR / 'algo_tracker_backend' / 'dev_env.env'
+    load_dotenv(dotenv_path=env_path)
 else:
     DEBUG = False
     ALLOWED_HOSTS = [] #TODO: Add heroku URL here
+
+TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "Not found")
 
 AUTH_USER_MODEL = 'api.CustomUser'
 
