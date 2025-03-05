@@ -32,8 +32,8 @@ class SignalSerializer(serializers.Serializer):
 
 class StrategySerializer(serializers.ModelSerializer):
     """Serializer for Strategies, including buy/sell signals and trades"""
-    buy_signals = SignalSerializer(many=True, read_only=True)
-    sell_signals = SignalSerializer(many=True, read_only=True)
+    buy_signals = serializers.JSONField()
+    sell_signals = serializers.JSONField()
     trades = TradeSerializer(many=True, read_only=True)
 
     class Meta:

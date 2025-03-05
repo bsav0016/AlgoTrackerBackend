@@ -79,6 +79,39 @@ class LogoutView(APIView):
             return Response({"detail": "Error: " + str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class DeviceIDView(APIView):
+    """API to manage device IDs for push notifications."""
+    permission_classes = [IsAuthenticated, ]
+
+    def post(self, request):
+        """Add a new device ID to the user's list."""
+        device_id = request.data.get("device_id")
+
+        if not device_id:
+            return Response({"error": "Device ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        if device_id not in user.device_ids:
+            user.add_device_id(device_id)
+            return Response({"message": "Device ID added successfully"}, status=status.HTTP_200_OK)
+        else:
+            return Response({"message": "Device ID already exists"}, status=status.HTTP_200_OK)
+
+    def delete(self, request):
+        """Remove a device ID from the user's list."""
+        device_id = request.data.get("device_id")
+
+        if not device_id:
+            return Response({"error": "Device ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        if device_id in user.device_ids:
+            user.remove_device_id(device_id)
+            return Response({"message": "Device ID removed successfully"}, status=status.HTTP_200_OK)
+        else:
+            return Response({"error": "Device ID not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
 class BacktestView(APIView):
     authentication_classes = [JWTAuthentication, ]
     permission_classes = [IsAuthenticated, ]
