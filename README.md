@@ -21,5 +21,5 @@ ex: `python manage.py runserver 192.168.1.144:8000`
 `celery -A algo_tracker_backend worker --loglevel=info --pool=solo`
 
 Notes:
-* To kill Celery tasks:
+* To kill Celery tasks (can be executed from any directory in command line):
 `taskkill /F /IM celery.exe`

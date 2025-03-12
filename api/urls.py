@@ -1,5 +1,7 @@
 from django.urls import path
-from api.views import UserRegistrationView, LoginView, LogoutView, BacktestView, StrategyView, DeviceIDView
+from api.views import (UserRegistrationView, LoginView, LogoutView, BacktestView, StrategyView, DeviceIDView,
+                       AvailableSymbolsAndIntervalsView, PasswordResetRequestView, PasswordResetConfirmView,
+                       StripePaymentView,StripePaymentConfirmationView)
 from rest_framework_simplejwt.views import TokenRefreshView
 
 
@@ -8,7 +10,14 @@ urlpatterns = [
     path('login/', LoginView.as_view(), name='login'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+
+    path('password-reset/', PasswordResetRequestView.as_view(), name='password-reset'),
+    path('password-reset-confirm/', PasswordResetConfirmView.as_view(), name='password-reset-confirm'),
+
     path('backtest/', BacktestView.as_view(), name='backtest'),
     path('strategy/', StrategyView.as_view(), name='strategy'),
-    path('device-id/', DeviceIDView.as_view(), name='device-id')
+    path('device-id/', DeviceIDView.as_view(), name='device-id'),
+    path('symbols-and-intervals/', AvailableSymbolsAndIntervalsView.as_view(), name='symbols-and-intervals'),
+    path('payment-intent/', StripePaymentView.as_view(), name='payment-intent'),
+    path('payment-confirmation/', StripePaymentConfirmationView.as_view(), name='payment-confirmation')
 ]

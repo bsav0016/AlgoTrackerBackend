@@ -1,8 +1,9 @@
 import websockets
-import json
 import asyncio
 from django.conf import settings
-import global_storage
+from api.redis_manager import RedisManager
+import json
+from datetime import timezone, datetime
 
 
 async def on_open(ws):
@@ -11,7 +12,7 @@ async def on_open(ws):
         await ws.send(json.dumps({
             "action": "subscribe",
             "params": {
-                "symbols": ",".join(global_storage.SYMBOLS),
+                "symbols": ",".join(settings.SYMBOLS),
                 "apikey": settings.TWELVE_DATA_API_KEY
             }
         }))
@@ -30,7 +31,12 @@ async def on_message(message):
                 print(f"Subscription failed: {data}")
 
         elif "symbol" in data and "price" in data:
-            global_storage.latest_prices[data["symbol"]] = data["price"]
+            for interval_key, interval_value in settings.INTERVAL_MAP.items():
+                last_close_time = RedisManager.get_last_close_time(data["symbol"], interval_key)
+                current_timestamp = int(datetime.now(timezone.utc).timestamp())
+                if last_close_time is None or (current_timestamp - last_close_time >= interval_value):
+                    await RedisManager.store_close_price(data["symbol"], interval_key, data["price"], current_timestamp)
+                    print("Saved data")
 
     except json.JSONDecodeError as e:
         print(f"JSON decoding error: {e}")
@@ -63,8 +69,3 @@ async def connect_to_twelvedata():
         except Exception as e:
             print(f"Unexpected error: {e}. Retrying in 5 seconds...")
             await asyncio.sleep(5)  # Wait before retrying
-
-
-def get_latest_price(symbol: str):
-    """Safely retrieves the latest price for a given symbol."""
-    return global_storage.latest_prices.get(symbol, None)

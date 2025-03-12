@@ -5,6 +5,9 @@ import pandas as pd
 from api.indicators.signal import Signal
 import datetime
 from typing import List
+import matplotlib.pyplot as plt
+import io
+import base64
 
 
 class BacktestService:
@@ -85,6 +88,8 @@ class BacktestService:
         new_data["return"] = 1.0
         new_data["return"] = new_data["return"].astype(float)
 
+        new_data.loc[0, "return"] = new_data.loc[0, "close"]
+
         for i in range(1, len(new_data)):
             prev_owned = new_data.iloc[i - 1]["owned"]
             curr_buy = new_data.iloc[i]["buy"]
@@ -106,3 +111,99 @@ class BacktestService:
                 new_data.iloc[i, new_data.columns.get_loc("return")] = prev_return
 
         return new_data
+
+    @staticmethod
+    def generate_backtest_chart(backtest_results: pd.DataFrame) -> str:
+        if backtest_results.empty:
+            raise ValueError("Backtest results are empty. Cannot generate chart.")
+
+        dates = backtest_results["datetime"]
+        prices = backtest_results["close"]
+        returns = backtest_results["return"]
+
+        backtest_results["buy_signal_transition"] = (
+                (backtest_results["buy"] == True) & (backtest_results["sell"] == False) & (backtest_results["owned"].shift(1, fill_value=0) == 0)
+        )
+
+        backtest_results["sell_signal_transition"] = (
+                (backtest_results["sell"] == True) & (backtest_results["buy"] == False) & (backtest_results["owned"].shift(1, fill_value=0) == 1)
+        )
+
+        buy_signals = backtest_results[backtest_results["buy_signal_transition"]]
+        sell_signals = backtest_results[backtest_results["sell_signal_transition"]]
+
+        min_value = min(prices.min(), returns.min())
+        max_value = max(prices.max(), returns.max())
+        buffer = (max_value - min_value) * 0.02
+
+        fig, ax1 = plt.subplots(figsize=(10, 5))
+
+        ax1.plot(dates, prices, color="blue", label="Commodity Price")
+        ax1.plot(dates, returns, color="red", label="Strategy Value")
+        ax1.set_xlabel("Date")
+        ax1.set_ylabel("Price")
+        ax1.set_ylim(min_value - buffer, max_value + buffer)
+        ax1.grid(True, which='both', axis='both', linestyle='--', color='gray', alpha=0.5)
+
+        for idx, date in enumerate(buy_signals["datetime"]):
+            if idx == 0:
+                ax1.axvline(x=date, color="green", linewidth=0.5, label="Buy Signal")
+            else:
+                ax1.axvline(x=date, color="green", linewidth=0.5)
+
+        for idx, date in enumerate(sell_signals["datetime"]):
+            if idx == 0:
+                ax1.axvline(x=date, color="red", linewidth=0.5, label="Sell Signal")
+            else:
+                ax1.axvline(x=date, color="red", linewidth=0.5)
+
+        fig.autofmt_xdate()
+        ax1.legend(loc="upper left")
+
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", bbox_inches="tight")
+        buf.seek(0)
+
+        img_base64 = base64.b64encode(buf.read()).decode("utf-8")
+        buf.close()
+        plt.close(fig)
+
+        return img_base64
+
+    @staticmethod
+    def calculate_sharpe_ratio(backtest_results: pd.DataFrame, risk_free_rate: float = 0.0) -> float:
+        """Calculates the Sharpe Ratio for the given backtest results."""
+        if backtest_results.empty or "return" not in backtest_results:
+            raise ValueError("Backtest results must contain return data to calculate Sharpe Ratio.")
+
+        returns = backtest_results["return"].pct_change().dropna()
+        excess_returns = returns - risk_free_rate
+
+        if returns.std() == 0:
+            return float("nan")
+
+        sharpe_ratio = excess_returns.mean() / excess_returns.std()
+        return sharpe_ratio
+
+    @staticmethod
+    def calculate_sortino_ratio(backtest_results: pd.DataFrame) -> float:
+        """Calculates the Sortino Ratio using the stock's return as the benchmark."""
+        if backtest_results.empty or "return" not in backtest_results or "close" not in backtest_results:
+            raise ValueError("Backtest results must contain return and stock price data.")
+
+        strategy_returns = backtest_results["return"].pct_change().dropna()
+        stock_returns = backtest_results["close"].pct_change().dropna()
+
+        min_length = min(len(strategy_returns), len(stock_returns))
+        strategy_returns = strategy_returns.iloc[:min_length]
+        stock_returns = stock_returns.iloc[:min_length]
+
+        excess_returns = strategy_returns - stock_returns
+
+        downside_returns = excess_returns[excess_returns < 0]
+
+        if downside_returns.std() == 0:
+            return float("nan")
+
+        sortino_ratio = excess_returns.mean() / downside_returns.std()
+        return sortino_ratio

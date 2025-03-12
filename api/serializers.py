@@ -5,18 +5,11 @@ from api.models import CustomUser, Strategy, Trade
 
 
 class TradeSerializer(serializers.ModelSerializer):
-    stock_value = serializers.SerializerMethodField()
+    price = serializers.DecimalField(max_digits=20, decimal_places=2, coerce_to_string=False)
 
     class Meta:
         model = Trade
-        fields = ['id', 'stock_value', 'is_buy']
-
-    def get_stock_value(self, obj):
-        return {
-            "symbol": obj.stock_value.symbol,
-            "date": obj.stock_value.date,
-            "price": obj.stock_value.price
-        }
+        fields = ['id', 'date', 'price', 'is_buy']
 
 
 class SignalSerializer(serializers.Serializer):
@@ -39,7 +32,8 @@ class StrategySerializer(serializers.ModelSerializer):
     class Meta:
         model = Strategy
         fields = [
-            'id', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'estimated_return', 'trades'
+            'id', 'title', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'strategy_return', 'asset_return',
+            'position', 'charge_user_date', 'trades'
         ]
 
 
@@ -98,7 +92,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
         model = CustomUser
         fields = [
             'id', 'username', 'first_name', 'last_name', 'email', 'account_funds', 'account_created',
-            'free_backtests', 'strategies'
+            'monthly_funds', 'reset_monthly_funds', 'strategies'
         ]
         read_only_fields = ['id', 'account_created', 'is_staff']
 
@@ -112,6 +106,7 @@ class BacktestRequestSerializer(serializers.Serializer):
 
 
 class StrategyRequestSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=50)
     symbol = serializers.CharField(max_length=50)
     interval = serializers.CharField(max_length=10)
     signals = SignalSerializer(many=True)

@@ -2,7 +2,6 @@ import threading
 import asyncio
 import sys
 from django.apps import AppConfig
-from api.websocket_client import connect_to_twelvedata
 
 
 class ApiConfig(AppConfig):
@@ -18,8 +17,8 @@ class ApiConfig(AppConfig):
     @staticmethod
     def start_websocket():
         """Runs the WebSocket client inside a new event loop in a thread."""
-        loop = asyncio.new_event_loop()  # Create a new event loop for the thread
-        asyncio.set_event_loop(loop)  # Set this event loop as the current one for the thread
-        # Use ensure_future to schedule the coroutine for execution
+        from api.websocket_client import connect_to_twelvedata
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         asyncio.ensure_future(connect_to_twelvedata())
-        loop.run_forever()  # Start the event loop and run until manually stopped
+        loop.run_forever()

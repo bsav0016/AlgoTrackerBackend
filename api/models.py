@@ -1,8 +1,25 @@
 from django.db import models
+from django.conf import settings
 from django.contrib.auth.models import BaseUserManager, AbstractBaseUser, PermissionsMixin, Permission, Group
 from django.utils.translation import gettext_lazy as _
+from django.db.models import F
 from api.indicators.signal import Signal
 from typing import List
+from api.services.signal_service import SignalService
+from api.services.backtest_service import BacktestService
+from api.services.notification_service import NotificationService
+from decimal import Decimal
+from django.utils import timezone
+from datetime import timedelta
+import logging
+
+logger = logging.getLogger(__name__)
+
+MONTHLY_FUNDS = settings.MONTHLY_FUNDS
+
+
+def get_thirty_days_away():
+    return timezone.now() + timedelta(days=30)
 
 
 class CustomUserManager(BaseUserManager):
@@ -31,7 +48,8 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
     account_created = models.DateTimeField(auto_now_add=True)
     account_funds = models.DecimalField(default=0, max_digits=10, decimal_places=2)
-    free_backtests = models.PositiveSmallIntegerField(default=5)
+    monthly_funds = models.DecimalField(default=MONTHLY_FUNDS, max_digits=10, decimal_places=2)
+    reset_monthly_funds = models.DateTimeField(default=get_thirty_days_away)
     device_ids = models.JSONField(default=list, blank=True)
 
     is_active = models.BooleanField(default=True)
@@ -67,18 +85,33 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
             self.device_ids.remove(device_id)
             self.save(update_fields=["device_ids"])
 
+    def check_monthly_funds(self):
+        """Reset monthly funds if the reset date has passed."""
+        if timezone.now() > self.reset_monthly_funds:
+            self.monthly_funds = F("monthly_funds") + MONTHLY_FUNDS  # Atomic update
+            self.reset_monthly_funds = timezone.now() + timedelta(days=30)
+            self.save(update_fields=["monthly_funds", "reset_monthly_funds"])
+
+    def add_funds(self, amount):
+        if amount > 0:
+            self.account_funds = F("account_funds") + amount
+            self.save(update_fields=["account_funds"])
+
     def __str__(self):
         return self.username
 
 
 class Strategy(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="strategies")
+    title = models.CharField(default='(Strategy Title)', max_length=50)
     symbol = models.CharField(max_length=20)
     interval = models.CharField(max_length=10)
     buy_signals = models.JSONField(default=list)
     sell_signals = models.JSONField(default=list)
-    estimated_return = models.DecimalField(default=1, max_digits=12, decimal_places=2, null=True, blank=True)
-    prices = models.JSONField(default=list)
+    position = models.SmallIntegerField(default=1) #0: sell, 1: hold (sold), 2: hold (bought), 3: buy
+    strategy_return = models.DecimalField(default=1, max_digits=10, decimal_places=5)
+    asset_return = models.DecimalField(default=1, max_digits=10, decimal_places=5)
+    charge_user_date = models.DateTimeField(default=get_thirty_days_away)
 
     def add_signals(self, signals: List[Signal]):
         updated_buy_signals = []
@@ -103,13 +136,110 @@ class Strategy(models.Model):
 
         self.buy_signals = updated_buy_signals
         self.sell_signals = updated_sell_signals
-
         self.save()
+
+    def combine_signals(self):
+        """Method to combine buy and sell signals, convert to Signal dataclass, and store them."""
+        buy_signal_objects = [
+            Signal(
+                name=signal['name'],
+                above_target=signal['above_target'],
+                buy_signal=True,
+                target_value=signal['target_value'],
+                window=signal.get('window'),
+                fast_window=signal.get('fast_window'),
+                slow_window=signal.get('slow_window'),
+                signal_window=signal.get('signal_window')
+            )
+            for signal in self.buy_signals
+        ]
+
+        sell_signal_objects = [
+            Signal(
+                name=signal['name'],
+                above_target=signal['above_target'],
+                buy_signal=False,
+                target_value=signal['target_value'],
+                window=signal.get('window'),
+                fast_window=signal.get('fast_window'),
+                slow_window=signal.get('slow_window'),
+                signal_window=signal.get('signal_window')
+            )
+            for signal in self.sell_signals
+        ]
+
+        combined_signals = buy_signal_objects + sell_signal_objects
+        return combined_signals
+
+    def check_signals(self, prices):
+        signals = self.combine_signals()
+        indicator_data = SignalService.calculate_indicators(prices, signals)
+        indicator_data = BacktestService.find_buys(indicator_data, signals)
+        indicator_data = BacktestService.find_sells(indicator_data, signals)
+
+        current_close = indicator_data.iloc[-1]
+        prev_close = indicator_data.iloc[-2]
+        asset_change = Decimal(current_close["close"] / prev_close["close"])
+        if asset_change is None:
+            asset_change = Decimal(1)
+
+        if self.position >= 2:
+            self.strategy_return = self.strategy_return * asset_change
+        self.asset_return = self.asset_return * asset_change
+
+        if current_close["buy"] and not current_close["sell"] and self.position < 2:
+            self.position = 3
+            self.send_notifications("New Buy Trigger!", f"{self.title} triggered a buy signal!")
+            trade = Trade(
+                strategy=self,
+                price=current_close["close"],
+                is_buy=True,
+            )
+            trade.save()
+        elif current_close["sell"] and not current_close["buy"] and self.position >= 2:
+            self.position = 0
+            self.send_notifications("New Sell Trigger!", f"{self.title} triggered a sell signal!")
+            trade = Trade(
+                strategy=self,
+                price=current_close["close"],
+                is_buy=False,
+            )
+            trade.save()
+        elif self.position < 2:
+            self.position = 1
+        else:
+            self.position = 2
+
+        self.strategy_return = self.strategy_return * current_close["close"] / indicator_data.iloc[-2]["close"]
+        self.save()
+        logger.info("Finished processing data")
+
+    def send_notifications(self, title, body):
+        user: "CustomUser" = self.user
+        for device_id in user.device_ids:
+            NotificationService.send_notification(device_id, title, body)
+
+    def charge_user(self, amount):
+        self.charge_user_date = timezone.now() + timedelta(days=30)
+        user: "CustomUser" = self.user
+        funds_diff = user.monthly_funds - amount
+        if funds_diff > 0:
+            user.monthly_funds = funds_diff
+        else:
+            user.monthly_funds = 0
+            user.account_funds -= funds_diff
+
+        if user.account_funds < 0:
+            user.account_funds = 0
+            self.delete()
+
+        user.save()
+
 
 
 class StockValue(models.Model):
     strategy = models.ForeignKey(Strategy, on_delete=models.CASCADE, related_name="stock_values")
-    date = models.DateTimeField(auto_now_add=True)
+    date = models.DateTimeField(default=timezone.now)
     price = models.DecimalField(max_digits=20, decimal_places=2)
 
     def __str__(self):
@@ -117,12 +247,13 @@ class StockValue(models.Model):
 
 
 class Trade(models.Model):
-    stock_value = models.ForeignKey(StockValue, on_delete=models.CASCADE)
     strategy = models.ForeignKey(Strategy, on_delete=models.CASCADE, related_name="trades")
+    date = models.DateTimeField(default=timezone.now)
+    price = models.DecimalField(default=0, max_digits=20, decimal_places=2)
     is_buy = models.BooleanField()
 
 
-#TODO: Verify if we need this
+#Not using it now but may use it later?
 class Backtest(models.Model):
     strategy = models.ForeignKey(Strategy, on_delete=models.CASCADE, related_name="backtests")
     start_date = models.DateTimeField()
@@ -130,8 +261,14 @@ class Backtest(models.Model):
     stock_values = models.ManyToManyField(StockValue)
 
 
-#TODO: Verify if we need this
+#Not using it now but may use it later?
 class IndicatorValue(models.Model):
     indicator = models.CharField(max_length=50)
     date = models.DateTimeField()
     value = models.DecimalField(max_digits=10, decimal_places=2)
+
+
+class PaymentIntent(models.Model):
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="payment_intents")
+    payment_intent_id = models.CharField(max_length=255)
+    amount = models.DecimalField(default=0, max_digits=10, decimal_places=2)

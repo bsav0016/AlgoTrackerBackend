@@ -11,6 +11,9 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 import os
 import dj_database_url
+import json
+import firebase_admin
+from firebase_admin import credentials
 from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
@@ -26,9 +29,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-$c0ckx+s-nbth5+@dx720@=mlr-kg3yq&4%2(zn!faq@g@b=w_'
-
 # SECURITY WARNING: don't run with debug turned on in production!
 if DEV_ENV:
     DEBUG = True
@@ -38,6 +38,9 @@ if DEV_ENV:
 else:
     DEBUG = False
     ALLOWED_HOSTS = [] #TODO: Add heroku URL here
+
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = os.getenv('SECRET_KEY', default='')
 
 TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "Not found")
 
@@ -56,7 +59,8 @@ INSTALLED_APPS = [
     'api',
     'rest_framework',
     'rest_framework_simplejwt',
-    'rest_framework_simplejwt.token_blacklist'
+    'rest_framework_simplejwt.token_blacklist',
+    'push_notifications'
 ]
 
 MIDDLEWARE = [
@@ -159,13 +163,69 @@ REST_FRAMEWORK = {
     ]
 }
 
+
+#JWT Authentication
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=500),  #TODO: Fix token issue and change this to 5
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=60),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
     'ROTATE_REFRESH_TOKENS': False,
 }
 
+
+#Celery
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://127.0.0.1:6379')
 CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
+
+
+#Redis
+REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
+try:
+    REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
+except:
+    REDIS_PORT = 6379
+try:
+    REDIS_DATABASE = int(os.getenv('REDIS_DATABASE', 0))
+except:
+    REDIS_DATABASE = 0
+
+
+#Loading variables for Frontend as well
+available_symbol_str = os.getenv("SYMBOLS", "")
+SYMBOLS = [symbol.strip() for symbol in available_symbol_str.split(",") if symbol.strip()]
+
+intervals_str = os.getenv("INTERVALS", "")
+INTERVAL_MAP = {key: int(value) for key, value in (pair.split(":") for pair in intervals_str.split(","))}
+
+
+#Firebase
+firebase_credentials_json = os.getenv("FIREBASE_CREDENTIALS")
+
+if firebase_credentials_json:
+    firebase_credentials = json.loads(firebase_credentials_json)
+    cred = credentials.Certificate(firebase_credentials)
+    firebase_admin.initialize_app(cred)
+else:
+    raise ValueError("Firebase credentials not found in environment variables.")
+
+
+#GMail
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', default='')
+EMAIL_HOST = os.getenv('EMAIL_HOST', default='')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', default=0))
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', default=False) == 'True'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', default='')
+
+
+#Funds information
+try:
+    MONTHLY_FUNDS = int(os.getenv('MONTHLY_FUNDS', 5))
+except:
+    MONTHLY_FUNDS = 5
+
+
+#Payment information
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', default='')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', default='')

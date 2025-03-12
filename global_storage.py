@@ -5,6 +5,4 @@ SYMBOLS = [
     "QQQ"
 ]
 
-WEBSOCKET_RUNNING = False
-
 latest_prices = {symbol: None for symbol in SYMBOLS}
