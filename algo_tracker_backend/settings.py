@@ -196,10 +196,13 @@ available_symbol_str = os.getenv("SYMBOLS", "")
 SYMBOLS = [symbol.strip() for symbol in available_symbol_str.split(",") if symbol.strip()]
 
 intervals_str = os.getenv("INTERVALS", "")
-INTERVAL_MAP = {key: int(value) for key, value in (pair.split(":") for pair in intervals_str.split(","))}
+INTERVAL_MAP = {
+    key: {"seconds": int(seconds), "monthly_charge": int(monthly_charge)}
+    for key, seconds, monthly_charge in (pair.split(":") for pair in intervals_str.split(","))
+}
 
 
-#Firebase
+#Firebase (notification service)
 firebase_credentials_json = os.getenv("FIREBASE_CREDENTIALS")
 
 if firebase_credentials_json:
@@ -210,7 +213,7 @@ else:
     raise ValueError("Firebase credentials not found in environment variables.")
 
 
-#GMail
+#Gmail
 EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', default='')
 EMAIL_HOST = os.getenv('EMAIL_HOST', default='')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', default=0))
@@ -220,6 +223,10 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', default='')
 
 
 #Funds information
+try:
+    BACKTEST_BASE_COST = float(os.getenv('BACKTEST_BASE_COST', 0.05))
+except:
+    BACKTEST_BASE_COST = 0.05
 try:
     MONTHLY_FUNDS = int(os.getenv('MONTHLY_FUNDS', 5))
 except:

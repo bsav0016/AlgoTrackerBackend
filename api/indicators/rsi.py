@@ -14,5 +14,4 @@ def calculate_rsi(data: pd.DataFrame, signal: Signal) -> pd.DataFrame:
     column_name = f"{signal.name}_{signal.window}"
     data[column_name] = rsi
 
-
     return data

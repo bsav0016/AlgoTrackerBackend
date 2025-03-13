@@ -21,6 +21,7 @@ from api.redis_manager import RedisManager
 import stripe
 from stripe import StripeError
 
+stripe.api_key = settings.STRIPE_SECRET_KEY
 
 class UserRegistrationView(APIView):
     authentication_classes = []
@@ -146,6 +147,7 @@ class BacktestView(APIView):
                 end_date = serializer.validated_data['end_date']
                 signals = serializer.validated_data['signals']
 
+
                 signals = [Signal(**signal) for signal in signals]
 
                 result = BacktestService.conduct_backtest(symbol, interval, start_date, end_date, signals)
@@ -171,10 +173,17 @@ class BacktestView(APIView):
                 sortino_ratio = BacktestService.calculate_sortino_ratio(result)
 
                 hours = 365 * 24 #TODO: This needs to be 252*6.5 if not traded 24/7
-                sqrt_n = math.sqrt(hours * 3600 / settings.INTERVAL_MAP[interval])
+                sqrt_n = math.sqrt(hours * 3600 / settings.INTERVAL_MAP[interval]['seconds'])
 
                 sharpe_ratio = sharpe_ratio * sqrt_n
                 sortino_ratio = sortino_ratio * sqrt_n
+
+                user = request.user
+                amount = settings.BACKTEST_BASE_COST
+                sufficient_funds = BacktestService.charge_user(user, amount)
+
+                if not sufficient_funds:
+                    return Response({"detail": f"Requires ${amount}"}, status=status.HTTP_402_PAYMENT_REQUIRED)
 
                 response_data = {
                     "result": processed_result,
@@ -185,7 +194,7 @@ class BacktestView(APIView):
 
                 return Response(response_data, status=status.HTTP_200_OK)
             except Exception as e:
-                print(e)
+                print(f"Error: {e}")
                 return Response({"detail": "Internal Error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -324,9 +333,9 @@ class StripePaymentView(APIView):
             saved_payment_intent.save()
 
             return Response({
-                "payment_intent": payment_intent,
-                "ephemeral_key": ephemeral_key,
-                "customer": customer
+                "payment_intent": payment_intent.client_secret,
+                "ephemeral_key": ephemeral_key.secret,
+                "customer": customer["id"]
             }, status=status.HTTP_201_CREATED)
 
         except (TypeError, ValueError):
@@ -342,17 +351,18 @@ class StripePaymentView(APIView):
 class StripePaymentConfirmationView(APIView):
     def post(self, request):
         event = None
-        payload = request.data
+        payload = request.body
         sig_header = request.headers['STRIPE_SIGNATURE']
 
+        print(sig_header)
         try:
             event = stripe.Webhook.construct_event(
                 payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
             )
         except ValueError as e:
-            raise e
+            return Response({"detail": f"Value error: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except stripe.error.SignatureVerificationError as e:
-            raise e
+            return Response({"detail": f"Stripe error: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         if event['type'] == 'payment_intent.succeeded':
             payment_intent = event['data']['object']
@@ -364,11 +374,12 @@ class StripePaymentConfirmationView(APIView):
                 amount = saved_payment_intent.amount
 
                 user.add_funds(amount)
+                user.save()
                 saved_payment_intent.delete()
+                print("Success")
 
                 return Response({"message": "Payment successful, funds added."}, status=status.HTTP_200_OK)
             except ObjectDoesNotExist:
                 return Response({"detail": "PaymentIntent not found."}, status=status.HTTP_404_NOT_FOUND)
-
         else:
-            return Response({"detail": f"Unhandled event type {event['type']}"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"message": "Other event type"}, status=status.HTTP_200_OK)

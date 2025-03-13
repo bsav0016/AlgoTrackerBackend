@@ -31,10 +31,10 @@ async def on_message(message):
                 print(f"Subscription failed: {data}")
 
         elif "symbol" in data and "price" in data:
-            for interval_key, interval_value in settings.INTERVAL_MAP.items():
+            for interval_key, interval_values in settings.INTERVAL_MAP.items():
                 last_close_time = RedisManager.get_last_close_time(data["symbol"], interval_key)
                 current_timestamp = int(datetime.now(timezone.utc).timestamp())
-                if last_close_time is None or (current_timestamp - last_close_time >= interval_value):
+                if last_close_time is None or (current_timestamp - last_close_time >= interval_values['seconds']):
                     await RedisManager.store_close_price(data["symbol"], interval_key, data["price"], current_timestamp)
                     print("Saved data")
 

@@ -16,6 +16,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 MONTHLY_FUNDS = settings.MONTHLY_FUNDS
+INTERVAL_MAP = settings.INTERVAL_MAP
 
 
 def get_thirty_days_away():
@@ -136,7 +137,7 @@ class Strategy(models.Model):
 
         self.buy_signals = updated_buy_signals
         self.sell_signals = updated_sell_signals
-        self.save()
+        self.save(update_fields=["buy_signals", "sell_signals"])
 
     def combine_signals(self):
         """Method to combine buy and sell signals, convert to Signal dataclass, and store them."""
@@ -211,6 +212,8 @@ class Strategy(models.Model):
             self.position = 2
 
         self.strategy_return = self.strategy_return * current_close["close"] / indicator_data.iloc[-2]["close"]
+        if self.charge_user_date > timezone.now():
+            self.charge_user(INTERVAL_MAP[self.interval]['monthly_charge'])
         self.save()
         logger.info("Finished processing data")
 
@@ -233,7 +236,7 @@ class Strategy(models.Model):
             user.account_funds = 0
             self.delete()
 
-        user.save()
+        user.save(update_fields=["monthly_funds", "account_funds"])
 
 
 
