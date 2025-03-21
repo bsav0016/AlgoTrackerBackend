@@ -22,6 +22,13 @@ import stripe
 from stripe import StripeError
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
+INTERVAL_MAP = settings.INTERVAL_MAP
+BACKTEST_BASE_COST = settings.BACKTEST_BASE_COST
+SYMBOLS = settings.SYMBOLS
+EMAIL_HOST = settings.EMAIL_HOST
+STRIPE_WEBHOOK_SECRET = settings.STRIPE_WEBHOOK_SECRET
+BACKTEST_ITERATIONS = settings.BACKTEST_ITERATIONS
+
 
 class UserRegistrationView(APIView):
     authentication_classes = []
@@ -89,8 +96,21 @@ class LogoutView(APIView):
             return Response({"detail": "Error: " + str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class UserDetailsView(APIView):
+    authentication_classes = [JWTAuthentication, ]
+    permission_classes = [IsAuthenticated, ]
+
+    def get(self, request):
+        user = request.user
+        user.check_monthly_funds()
+        user_data = CustomUserSerializer(user).data
+
+        return Response({**user_data}, status=status.HTTP_200_OK)
+
+
 class DeviceIDView(APIView):
     """API to manage device IDs for push notifications."""
+    authentication_classes = [JWTAuthentication, ]
     permission_classes = [IsAuthenticated, ]
 
     def post(self, request):
@@ -123,13 +143,16 @@ class DeviceIDView(APIView):
 
 
 class AvailableSymbolsAndIntervalsView(APIView):
+    authentication_classes = [JWTAuthentication, ]
     permission_classes = [IsAuthenticated, ]
 
     def post(self, request):
-        intervals = list(settings.INTERVAL_MAP.keys())
+        intervals = [{"interval": key, "monthly_charge": value["monthly_charge"]} for key, value in INTERVAL_MAP]
         return Response({
-            "symbols": settings.SYMBOLS,
-            "intervals": intervals
+            "symbols": SYMBOLS,
+            "intervals": intervals,
+            "backtest_base_cost": BACKTEST_BASE_COST,
+            "backtest_iterations": BACKTEST_ITERATIONS
         }, status=status.HTTP_200_OK)
 
 
@@ -147,10 +170,9 @@ class BacktestView(APIView):
                 end_date = serializer.validated_data['end_date']
                 signals = serializer.validated_data['signals']
 
-
                 signals = [Signal(**signal) for signal in signals]
 
-                result = BacktestService.conduct_backtest(symbol, interval, start_date, end_date, signals)
+                result, attempts = BacktestService.conduct_backtest(symbol, interval, start_date, end_date, signals)
                 raw_result = result.to_dict(orient='records')
 
                 processed_result = []
@@ -168,19 +190,25 @@ class BacktestView(APIView):
 
                     processed_result.append(transformed_entry)
 
-                img_base64 = BacktestService.generate_backtest_chart(result)
-                sharpe_ratio = BacktestService.calculate_sharpe_ratio(result)
-                sortino_ratio = BacktestService.calculate_sortino_ratio(result)
+                img_base64, img_base64_no_signals = BacktestService.generate_backtest_chart(result)
+                percent_return, percent_return_adj = BacktestService.calculate_percent_return(result)
+                sharpe_ratio, sharpe_ratio_adj = BacktestService.calculate_sharpe_ratio(result)
+                sortino_ratio, sortino_ratio_adj = BacktestService.calculate_sortino_ratio(result)
 
                 hours = 365 * 24 #TODO: This needs to be 252*6.5 if not traded 24/7
-                sqrt_n = math.sqrt(hours * 3600 / settings.INTERVAL_MAP[interval]['seconds'])
+                seconds = hours * 3600
+                sqrt_n = math.sqrt(seconds / INTERVAL_MAP[interval]['seconds'])
 
+                percent_return = percent_return * seconds / INTERVAL_MAP[interval]['seconds']
+                percent_return_adj = percent_return_adj * seconds / INTERVAL_MAP[interval]['seconds']
                 sharpe_ratio = sharpe_ratio * sqrt_n
+                sharpe_ratio_adj = sharpe_ratio_adj * sqrt_n
                 sortino_ratio = sortino_ratio * sqrt_n
+                sortino_ratio_adj = sortino_ratio_adj * sqrt_n
 
                 user = request.user
-                amount = settings.BACKTEST_BASE_COST
-                sufficient_funds = BacktestService.charge_user(user, amount)
+                amount = BACKTEST_BASE_COST * attempts
+                sufficient_funds, account_funds, monthly_funds = BacktestService.charge_user(user, amount)
 
                 if not sufficient_funds:
                     return Response({"detail": f"Requires ${amount}"}, status=status.HTTP_402_PAYMENT_REQUIRED)
@@ -188,8 +216,15 @@ class BacktestView(APIView):
                 response_data = {
                     "result": processed_result,
                     "image": img_base64,
+                    "image_no_signals": img_base64_no_signals,
+                    "percent_return": percent_return,
+                    "percent_return_adj": percent_return_adj,
                     "sharpe_ratio": sharpe_ratio,
-                    "sortino_ratio": sortino_ratio
+                    "sharpe_ratio_adj": sharpe_ratio_adj,
+                    "sortino_ratio": sortino_ratio,
+                    "sortino_ratio_adj": sortino_ratio_adj,
+                    "user_account_funds": account_funds,
+                    "user_monthly_funds": monthly_funds
                 }
 
                 return Response(response_data, status=status.HTTP_200_OK)
@@ -270,7 +305,7 @@ class PasswordResetRequestView(APIView):
                     "This code will expire in 10 minutes.\n\n" +
                     "Sincerely,\n" +
                     "AlgoTracker Support",
-            from_email=settings.EMAIL_HOST,
+            from_email=EMAIL_HOST,
             recipient_list=[email],
         )
 
@@ -357,7 +392,7 @@ class StripePaymentConfirmationView(APIView):
         print(sig_header)
         try:
             event = stripe.Webhook.construct_event(
-                payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+                payload, sig_header, STRIPE_WEBHOOK_SECRET
             )
         except ValueError as e:
             return Response({"detail": f"Value error: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

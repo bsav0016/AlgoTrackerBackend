@@ -9,6 +9,10 @@ import matplotlib.pyplot as plt
 import io
 import base64
 from decimal import Decimal
+import pytz
+
+TWELVE_DATA_API_KEY = settings.TWELVE_DATA_API_KEY
+BACKTEST_ITERATIONS = settings.BACKTEST_ITERATIONS
 
 
 class BacktestService:
@@ -19,25 +23,35 @@ class BacktestService:
             start_date: datetime,
             end_date: datetime,
             signals: List[Signal]
-    ) -> pd.DataFrame:
-        data = BacktestService.get_data(symbol, interval, end_date)
+    ) -> tuple[pd.DataFrame, int]:
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=pytz.UTC)
+        data, attempts = BacktestService.get_data(symbol, interval, start_date, end_date)
         indicator_data = SignalService.calculate_indicators(data, signals)
-        start_date = pd.Timestamp(start_date).tz_localize(None)
         indicator_data["datetime"] = pd.to_datetime(indicator_data["datetime"], errors="coerce")
         indicator_data = indicator_data[indicator_data["datetime"] >= start_date]
         indicator_data = BacktestService.find_buys(indicator_data, signals)
         indicator_data = BacktestService.find_sells(indicator_data, signals)
-        return BacktestService.calculate_returns(indicator_data)
+        return BacktestService.calculate_returns(indicator_data), attempts
 
     @staticmethod
-    def get_data(symbol: str, interval: str, end_date: datetime) -> pd.DataFrame:
+    def get_data(
+            symbol: str,
+            interval: str,
+            start_date: datetime,
+            end_date: datetime,
+            attempts: int = 1
+    ) -> tuple[pd.DataFrame, int]:
+        if attempts > BACKTEST_ITERATIONS:
+            return pd.DataFrame(columns=["datetime", "close"]), attempts
+
         url = "https://api.twelvedata.com/time_series"
         params = {
             "symbol": symbol,
             "interval": interval,
             "outputsize": 5000,
             "end_date": end_date.strftime("%Y-%m-%d"),
-            "apikey": settings.TWELVE_DATA_API_KEY
+            "apikey": TWELVE_DATA_API_KEY
         }
 
         response = requests.get(url, params=params)
@@ -46,13 +60,18 @@ class BacktestService:
             data = response.json()
             if 'values' in data:
                 df = pd.DataFrame(data["values"], columns=["datetime", "close"])
-                df["datetime"] = df["datetime"].astype(str)
-                df["datetime"] = pd.to_datetime(df["datetime"].astype(str))
+                df["datetime"] = pd.to_datetime(df["datetime"]).dt.tz_localize("UTC")
+
                 df["close"] = pd.to_numeric(df["close"], errors="coerce")
                 df = df[::-1].reset_index(drop=True)
-                return df
+                if df.empty or df["datetime"].iloc[0] <= start_date:
+                    return df, attempts
+
+                new_end_date = df["datetime"].iloc[0]
+                previous_data, max_attempts = BacktestService.get_data(symbol, interval, start_date, new_end_date, attempts + 1)
+                return pd.concat([previous_data, df], ignore_index=True), max_attempts
             else:
-                raise ValueError(f"Values not found in response")
+                raise ValueError("Values not found in response")
         else:
             raise Exception(f"API request failed with status {response.status_code}: {response.text}")
 
@@ -87,8 +106,6 @@ class BacktestService:
         new_data["return"] = 1.0
         new_data["return"] = new_data["return"].astype(float)
 
-        print(new_data.index)
-        print(new_data.head())
         new_data.at[0, "return"] = new_data.at[0, "close"]
 
         for i in range(1, len(new_data)):
@@ -113,11 +130,10 @@ class BacktestService:
         return new_data
 
     @staticmethod
-    def generate_backtest_chart(backtest_results: pd.DataFrame) -> str:
+    def generate_backtest_chart(backtest_results: pd.DataFrame) -> tuple[str, str]:
         if backtest_results.empty:
             raise ValueError("Backtest results are empty. Cannot generate chart.")
         results = backtest_results.copy().dropna()
-        print(results)
 
         dates = results["datetime"]
         prices = results["close"]
@@ -147,6 +163,15 @@ class BacktestService:
         ax1.set_ylim(min_value - buffer, max_value + buffer)
         ax1.grid(True, which='both', axis='both', linestyle='--', color='gray', alpha=0.5)
 
+        fig.autofmt_xdate()
+        ax1.legend(loc="upper left")
+
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", bbox_inches="tight")
+        buf.seek(0)
+        img_base64_no_signals = base64.b64encode(buf.read()).decode("utf-8")
+        buf.close()
+
         for idx, date in enumerate(buy_signals["datetime"]):
             if idx == 0:
                 ax1.axvline(x=date, color="green", linewidth=0.5, label="Buy Signal")
@@ -159,57 +184,86 @@ class BacktestService:
             else:
                 ax1.axvline(x=date, color="red", linewidth=0.5)
 
-        fig.autofmt_xdate()
         ax1.legend(loc="upper left")
-
         buf = io.BytesIO()
         plt.savefig(buf, format="png", bbox_inches="tight")
         buf.seek(0)
-
         img_base64 = base64.b64encode(buf.read()).decode("utf-8")
         buf.close()
+
         plt.close(fig)
         del fig
 
-        return img_base64
+        return img_base64, img_base64_no_signals
 
     @staticmethod
-    def calculate_sharpe_ratio(backtest_results: pd.DataFrame, risk_free_rate: float = 0.0) -> float:
+    def calculate_sharpe_ratio(backtest_results: pd.DataFrame) -> tuple[float, float]:
         """Calculates the Sharpe Ratio for the given backtest results."""
         if backtest_results.empty or "return" not in backtest_results:
             raise ValueError("Backtest results must contain return data to calculate Sharpe Ratio.")
 
         returns = backtest_results["return"].dropna().pct_change()
-        excess_returns = returns - risk_free_rate
-
         if returns.std() == 0:
             return float("nan")
+        sharpe_ratio = returns.mean() / returns.std()
 
-        sharpe_ratio = excess_returns.mean() / excess_returns.std()
-        return sharpe_ratio
+        #Adjusted for asset price
+        strategy_returns = backtest_results["return"].dropna().pct_change()
+        asset_returns = backtest_results["close"].dropna().pct_change()
+        min_length = min(len(strategy_returns), len(asset_returns))
+        strategy_returns = strategy_returns.iloc[:min_length]
+        asset_returns = asset_returns.iloc[:min_length]
+        excess_returns = strategy_returns - asset_returns
+        if excess_returns.std() == 0:
+            return float("nan")
+        sharpe_ratio_adj = excess_returns.mean() / excess_returns.std()
+
+        return sharpe_ratio, sharpe_ratio_adj
 
     @staticmethod
-    def calculate_sortino_ratio(backtest_results: pd.DataFrame) -> float:
+    def calculate_sortino_ratio(backtest_results: pd.DataFrame) -> tuple[float, float]:
         """Calculates the Sortino Ratio using the stock's return as the benchmark."""
         if backtest_results.empty or "return" not in backtest_results or "close" not in backtest_results:
             raise ValueError("Backtest results must contain return and stock price data.")
 
+        # Risk-free (0% baseline)
         strategy_returns = backtest_results["return"].dropna().pct_change()
-        stock_returns = backtest_results["close"].dropna().pct_change()
-
-        min_length = min(len(strategy_returns), len(stock_returns))
-        strategy_returns = strategy_returns.iloc[:min_length]
-        stock_returns = stock_returns.iloc[:min_length]
-
-        excess_returns = strategy_returns - stock_returns
-
-        downside_returns = excess_returns[excess_returns < 0]
-
+        downside_returns = strategy_returns[strategy_returns < 0]
         if downside_returns.std() == 0:
             return float("nan")
+        sortino_ratio = strategy_returns.mean() / downside_returns.std()
 
-        sortino_ratio = excess_returns.mean() / downside_returns.std()
-        return sortino_ratio
+        # Adjusted using asset price as the baseline
+        asset_returns = backtest_results["close"].dropna().pct_change()
+        min_length = min(len(strategy_returns), len(asset_returns))
+        strategy_returns = strategy_returns.iloc[:min_length]
+        asset_returns = asset_returns.iloc[:min_length]
+        excess_returns = strategy_returns - asset_returns
+        downside_returns = excess_returns[excess_returns < 0]
+        if downside_returns.std() == 0:
+            return float("nan")
+        sortino_ratio_adj = excess_returns.mean() / downside_returns.std()
+
+        return sortino_ratio, sortino_ratio_adj
+
+    @staticmethod
+    def calculate_percent_return(backtest_results: pd.DataFrame) -> tuple[float, float]:
+        """Calculates the annual percentage gain of the strategy and compares it to the stock's annual percentage gain."""
+        if backtest_results.empty or "return" not in backtest_results or "close" not in backtest_results:
+            raise ValueError("Backtest results must contain return and stock price data.")
+
+        strategy_returns = backtest_results["return"].dropna().pct_change()
+        asset_returns = backtest_results["close"].dropna().pct_change()
+
+        min_length = min(len(strategy_returns), len(asset_returns))
+        strategy_returns = strategy_returns.iloc[:min_length]
+        asset_returns = asset_returns.iloc[:min_length]
+        percent_return = strategy_returns.mean()
+
+        asset_return = asset_returns.mean()
+        percent_return_adj = percent_return - asset_return
+
+        return percent_return, percent_return_adj
 
     @staticmethod
     def charge_user(user, amount):
@@ -218,11 +272,11 @@ class BacktestService:
         if funds_diff > 0:
             user.monthly_funds = funds_diff
             user.save()
-            return True
+            return True, user.account_funds, user.monthly_funds
         elif user.monthly_funds + user.account_funds >= amount_decimal:
             user.monthly_funds = 0
             user.account_funds -= funds_diff
             user.save()
-            return True
+            return True, user.account_funds, user.monthly_funds
         else:
-            return False
+            return False, None, None

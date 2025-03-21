@@ -224,9 +224,13 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', default='')
 
 #Funds information
 try:
-    BACKTEST_BASE_COST = float(os.getenv('BACKTEST_BASE_COST', 0.05))
+    BACKTEST_BASE_COST = float(os.getenv('BACKTEST_BASE_COST', 0.03))
 except:
-    BACKTEST_BASE_COST = 0.05
+    BACKTEST_BASE_COST = 0.03
+try:
+    BACKTEST_ITERATIONS = int(os.getenv('BACKTEST_ITERATIONS', 5))
+except:
+    BACKTEST_ITERATIONS = 5
 try:
     MONTHLY_FUNDS = int(os.getenv('MONTHLY_FUNDS', 5))
 except:
