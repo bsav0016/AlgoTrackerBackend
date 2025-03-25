@@ -5,6 +5,7 @@ import pandas as pd
 from api.indicators.signal import Signal
 import datetime
 from typing import List
+import matplotlib
 import matplotlib.pyplot as plt
 import io
 import base64
@@ -13,6 +14,8 @@ import pytz
 
 TWELVE_DATA_API_KEY = settings.TWELVE_DATA_API_KEY
 BACKTEST_ITERATIONS = settings.BACKTEST_ITERATIONS
+
+matplotlib.use("Agg")
 
 
 class BacktestService:
@@ -43,7 +46,7 @@ class BacktestService:
             attempts: int = 1
     ) -> tuple[pd.DataFrame, int]:
         if attempts > BACKTEST_ITERATIONS:
-            return pd.DataFrame(columns=["datetime", "close"]), attempts
+            return pd.DataFrame(columns=["datetime", "close", "low", "high"]), attempts
 
         url = "https://api.twelvedata.com/time_series"
         params = {
@@ -59,10 +62,12 @@ class BacktestService:
         if response.status_code == 200:
             data = response.json()
             if 'values' in data:
-                df = pd.DataFrame(data["values"], columns=["datetime", "close"])
+                df = pd.DataFrame(data["values"], columns=["datetime", "close", "low", "high"])
                 df["datetime"] = pd.to_datetime(df["datetime"]).dt.tz_localize("UTC")
 
                 df["close"] = pd.to_numeric(df["close"], errors="coerce")
+                df["low"] = pd.to_numeric(df["low"], errors="coerce")
+                df["high"] = pd.to_numeric(df["high"], errors="coerce")
                 df = df[::-1].reset_index(drop=True)
                 if df.empty or df["datetime"].iloc[0] <= start_date:
                     return df, attempts
@@ -79,9 +84,15 @@ class BacktestService:
     def find_buys(data: pd.DataFrame, signals: List[Signal]) -> pd.DataFrame:
         new_data = data.copy()
         new_data["buy"] = True
+        #Add indicator data here
         for signal in signals:
             if signal.buy_signal:
-                indicator_column = f"{signal.name}_{signal.window}"
+                if signal.name in ["RSI", "SMA", "EMA", "SO", "BBP", "ADX"]:
+                    indicator_column = f"{signal.name}_{signal.window}"
+                elif signal.name in ["MACD"]:
+                    indicator_column = f"{signal.name}_{signal.fast_window}_{signal.slow_window}_{signal.signal_window}"
+                else:
+                    indicator_column = f"{signal.name}_{signal.window}"
                 condition = new_data[indicator_column] > signal.target_value if signal.above_target else (
                         new_data[indicator_column] < signal.target_value)
                 new_data["buy"] = new_data["buy"] & condition
@@ -258,12 +269,12 @@ class BacktestService:
         min_length = min(len(strategy_returns), len(asset_returns))
         strategy_returns = strategy_returns.iloc[:min_length]
         asset_returns = asset_returns.iloc[:min_length]
-        percent_return = strategy_returns.mean()
+        percent_return = strategy_returns.sum()
 
-        asset_return = asset_returns.mean()
+        asset_return = asset_returns.sum()
         percent_return_adj = percent_return - asset_return
 
-        return percent_return, percent_return_adj
+        return percent_return * 100, percent_return_adj * 100
 
     @staticmethod
     def charge_user(user, amount):

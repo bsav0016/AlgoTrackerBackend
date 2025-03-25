@@ -8,5 +8,6 @@ def calculate_ema(data: pd.DataFrame, signal: Signal) -> pd.DataFrame:
 
     column_name = f"{signal.name}_{signal.window}"
     data[column_name] = data["close"].ewm(span=signal.window, adjust=False).mean()
+    data[column_name] = data[column_name] / data["close"]
 
     return data

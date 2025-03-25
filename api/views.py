@@ -147,7 +147,7 @@ class AvailableSymbolsAndIntervalsView(APIView):
     permission_classes = [IsAuthenticated, ]
 
     def post(self, request):
-        intervals = [{"interval": key, "monthly_charge": value["monthly_charge"]} for key, value in INTERVAL_MAP]
+        intervals = [{"interval": key, "monthly_charge": value["monthly_charge"]} for key, value in INTERVAL_MAP.items()]
         return Response({
             "symbols": SYMBOLS,
             "intervals": intervals,
@@ -195,16 +195,17 @@ class BacktestView(APIView):
                 sharpe_ratio, sharpe_ratio_adj = BacktestService.calculate_sharpe_ratio(result)
                 sortino_ratio, sortino_ratio_adj = BacktestService.calculate_sortino_ratio(result)
 
-                hours = 365 * 24 #TODO: This needs to be 252*6.5 if not traded 24/7
-                seconds = hours * 3600
-                sqrt_n = math.sqrt(seconds / INTERVAL_MAP[interval]['seconds'])
+                duration_minutes = (result.iloc[-1]["datetime"] - result.iloc[0]["datetime"]).total_seconds() / 60
+                minutes_per_year = 525600
+                annualize_factor = minutes_per_year / duration_minutes
+                print(annualize_factor)
 
-                percent_return = percent_return * seconds / INTERVAL_MAP[interval]['seconds']
-                percent_return_adj = percent_return_adj * seconds / INTERVAL_MAP[interval]['seconds']
-                sharpe_ratio = sharpe_ratio * sqrt_n
-                sharpe_ratio_adj = sharpe_ratio_adj * sqrt_n
-                sortino_ratio = sortino_ratio * sqrt_n
-                sortino_ratio_adj = sortino_ratio_adj * sqrt_n
+                percent_return = percent_return * annualize_factor
+                percent_return_adj = percent_return_adj * annualize_factor
+                sharpe_ratio = sharpe_ratio * annualize_factor
+                sharpe_ratio_adj = sharpe_ratio_adj * annualize_factor
+                sortino_ratio = sortino_ratio * annualize_factor
+                sortino_ratio_adj = sortino_ratio_adj * annualize_factor
 
                 user = request.user
                 amount = BACKTEST_BASE_COST * attempts

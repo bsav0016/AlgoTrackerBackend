@@ -8,5 +8,6 @@ def calculate_sma(data: pd.DataFrame, signal: Signal) -> pd.DataFrame:
 
     column_name = f"{signal.name}_{signal.window}"
     data[column_name] = data["close"].rolling(window=signal.window).mean()
+    data[column_name] = data[column_name] / data["close"]
 
     return data

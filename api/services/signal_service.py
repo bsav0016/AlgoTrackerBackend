@@ -40,7 +40,7 @@ class SignalService:
             else:
                 return calculate_macd(data, signal)
         elif signal.name == "SO":
-            if f"{signal.name}_{signal.fast_window}_{signal.slow_window}" in data:
+            if f"{signal.name}_{signal.window}" in data:
                 return data
             else:
                 return calculate_so(data, signal)
@@ -54,6 +54,6 @@ class SignalService:
                 return data
             else:
                 return calculate_adx(data, signal)
-        #TODO: Add indicator data here
+        #Add indicator data here
         else:
             raise ValueError("Indicator not recognized")

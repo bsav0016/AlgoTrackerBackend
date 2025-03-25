@@ -47,7 +47,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
     email = models.EmailField(unique=True)
-    account_created = models.DateTimeField(auto_now_add=True)
+    account_created = models.DateTimeField(default=timezone.now)
     account_funds = models.DecimalField(default=0, max_digits=10, decimal_places=2)
     monthly_funds = models.DecimalField(default=MONTHLY_FUNDS, max_digits=10, decimal_places=2)
     reset_monthly_funds = models.DateTimeField(default=get_thirty_days_away)
@@ -113,6 +113,7 @@ class Strategy(models.Model):
     strategy_return = models.DecimalField(default=1, max_digits=10, decimal_places=5)
     asset_return = models.DecimalField(default=1, max_digits=10, decimal_places=5)
     charge_user_date = models.DateTimeField(default=get_thirty_days_away)
+    active = models.BooleanField(default=True)
 
     def add_signals(self, signals: List[Signal]):
         updated_buy_signals = []
@@ -212,7 +213,7 @@ class Strategy(models.Model):
             self.position = 2
 
         self.strategy_return = self.strategy_return * current_close["close"] / indicator_data.iloc[-2]["close"]
-        if self.charge_user_date > timezone.now():
+        if timezone.now() > self.charge_user_date:
             self.charge_user(INTERVAL_MAP[self.interval]['monthly_charge'])
         self.save()
         logger.info("Finished processing data")

@@ -33,7 +33,7 @@ class StrategySerializer(serializers.ModelSerializer):
         model = Strategy
         fields = [
             'id', 'title', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'strategy_return', 'asset_return',
-            'position', 'charge_user_date', 'trades'
+            'position', 'charge_user_date', 'active', 'trades'
         ]
 
 
