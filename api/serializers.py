@@ -2,6 +2,9 @@ from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from django.contrib.auth import authenticate
 from api.models import CustomUser, Strategy, Trade
+from django.conf import settings
+
+PROMO_CODES = settings.PROMO_CODES
 
 
 class TradeSerializer(serializers.ModelSerializer):

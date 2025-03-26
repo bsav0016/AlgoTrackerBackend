@@ -8,12 +8,7 @@ import requests
 from datetime import datetime, timezone
 import asyncio
 
-redis_client = redis.Redis(
-    host=settings.REDIS_HOST,
-    port=settings.REDIS_PORT,
-    db=settings.REDIS_DATABASE,
-    decode_responses=True
-)
+redis_client = redis.Redis.from_url(settings.REDIS_URL)
 
 TWELVE_DATA_API_KEY = settings.TWELVE_DATA_API_KEY
 SYMBOLS = settings.SYMBOLS
@@ -28,7 +23,7 @@ class CreditsUsedError(ValueError):
 class RedisManager:
     @staticmethod
     async def populate_redis_all():
-        unread_pairs = [[symbol, interval] for symbol in SYMBOLS for interval in INTERVAL_MAP.keys()]
+        unread_pairs = [[symbol, interval] for symbol in list(SYMBOLS.keys()) for interval in list(INTERVAL_MAP.keys())]
 
         while unread_pairs:
             end_date = datetime.now(tz=timezone.utc)

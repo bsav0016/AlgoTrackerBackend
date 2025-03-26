@@ -95,7 +95,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
 
     def add_funds(self, amount):
         if amount > 0:
-            self.account_funds = F("account_funds") + amount
+            self.account_funds += Decimal(amount)
             self.save(update_fields=["account_funds"])
 
     def __str__(self):

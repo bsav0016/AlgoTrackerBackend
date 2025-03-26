@@ -37,7 +37,7 @@ if DEV_ENV:
     load_dotenv(dotenv_path=env_path)
 else:
     DEBUG = False
-    ALLOWED_HOSTS = [] #TODO: Add heroku URL here
+    ALLOWED_HOSTS = ["https://algo-tracker-c96c1f4d7f6e.herokuapp.com"]
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv('SECRET_KEY', default='')
@@ -173,27 +173,21 @@ SIMPLE_JWT = {
 
 
 #Celery
-CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://127.0.0.1:6379')
-CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379'
+CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 
 
 #Redis
-REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
-try:
-    REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
-except:
-    REDIS_PORT = 6379
-try:
-    REDIS_DATABASE = int(os.getenv('REDIS_DATABASE', 0))
-except:
-    REDIS_DATABASE = 0
+REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 
 
 #Loading variables for Frontend as well
 available_symbol_str = os.getenv("SYMBOLS", "")
-SYMBOLS = [symbol.strip() for symbol in available_symbol_str.split(",") if symbol.strip()]
+SYMBOLS = {
+    key: float(value)
+    for key, value in (pair.split(":") for pair in available_symbol_str.split(","))
+}
 
 intervals_str = os.getenv("INTERVALS", "")
 INTERVAL_MAP = {
@@ -240,3 +234,11 @@ except:
 #Payment information
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', default='')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', default='')
+
+
+#Promo codes
+promo_code_str = os.getenv('PROMO_CODES', default='')
+PROMO_CODES = {
+    key: value
+    for key, value in (pair.split(":") for pair in promo_code_str.split(","))
+}

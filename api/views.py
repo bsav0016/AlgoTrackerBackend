@@ -1,9 +1,8 @@
 import math
-
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.conf import settings
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -16,6 +15,7 @@ from api.indicators.signal import Signal
 from rest_framework_simplejwt.authentication import JWTAuthentication
 import random
 import numpy as np
+from decimal import Decimal
 from django.core.mail import send_mail
 from api.redis_manager import RedisManager
 import stripe
@@ -28,6 +28,7 @@ SYMBOLS = settings.SYMBOLS
 EMAIL_HOST = settings.EMAIL_HOST
 STRIPE_WEBHOOK_SECRET = settings.STRIPE_WEBHOOK_SECRET
 BACKTEST_ITERATIONS = settings.BACKTEST_ITERATIONS
+PROMO_CODES = settings.PROMO_CODES
 
 
 class UserRegistrationView(APIView):
@@ -36,20 +37,33 @@ class UserRegistrationView(APIView):
 
     def post(self, request, format=None):
         try:
-            serializer = UserRegistrationSerializer(data=request.data)
-            if serializer.is_valid():
-                user = serializer.save()
-                tokens = AuthService.create_tokens(user=user)
+            data = request.data
+            promo_code = data.pop("promo_code", "")
+            serializer = UserRegistrationSerializer(data=data)
+            if not serializer.is_valid():
+                return Response({"detail": serializer.errors}, status=status.HTTP_409_CONFLICT)
 
-                user_data = CustomUserSerializer(user).data
-                return Response({
-                    **user_data,
-                    "refresh_token": tokens['refresh'],
-                    "access_token": tokens['access'],
-                },
-                    status=status.HTTP_201_CREATED
-                )
-            return Response({"detail": serializer.errors}, status=status.HTTP_409_CONFLICT)
+            if promo_code not in ["", " ", "N/A"] \
+                    and promo_code not in list(PROMO_CODES.keys()):
+                raise ValidationError("Invalid promo code")
+
+            user = serializer.save()
+            tokens = AuthService.create_tokens(user=user)
+
+            if promo_code in list(PROMO_CODES.keys()):
+                promo_code_value = Decimal(PROMO_CODES[promo_code])
+                user.add_funds(promo_code_value)
+
+            user_data = CustomUserSerializer(user).data
+            return Response({
+                **user_data,
+                "refresh_token": tokens['refresh'],
+                "access_token": tokens['access'],
+            },
+                status=status.HTTP_201_CREATED
+            )
+        except ValidationError as e:
+            return Response({"detail": e}, status=status.HTTP_409_CONFLICT)
         except Exception as e:
             print(e)
             return Response({"detail": "Error registering user"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -149,7 +163,7 @@ class AvailableSymbolsAndIntervalsView(APIView):
     def post(self, request):
         intervals = [{"interval": key, "monthly_charge": value["monthly_charge"]} for key, value in INTERVAL_MAP.items()]
         return Response({
-            "symbols": SYMBOLS,
+            "symbols": list(SYMBOLS.keys()),
             "intervals": intervals,
             "backtest_base_cost": BACKTEST_BASE_COST,
             "backtest_iterations": BACKTEST_ITERATIONS
@@ -198,14 +212,18 @@ class BacktestView(APIView):
                 duration_minutes = (result.iloc[-1]["datetime"] - result.iloc[0]["datetime"]).total_seconds() / 60
                 minutes_per_year = 525600
                 annualize_factor = minutes_per_year / duration_minutes
-                print(annualize_factor)
+
+                seconds_per_year = minutes_per_year * 60
+                seconds_per_year_adj = seconds_per_year * SYMBOLS[symbol] / (365 * 24)
+                periods_per_year = seconds_per_year_adj / INTERVAL_MAP[interval]["seconds"]
+                sqrt_n = math.sqrt(periods_per_year)
 
                 percent_return = percent_return * annualize_factor
                 percent_return_adj = percent_return_adj * annualize_factor
-                sharpe_ratio = sharpe_ratio * annualize_factor
-                sharpe_ratio_adj = sharpe_ratio_adj * annualize_factor
-                sortino_ratio = sortino_ratio * annualize_factor
-                sortino_ratio_adj = sortino_ratio_adj * annualize_factor
+                sharpe_ratio = sharpe_ratio * sqrt_n
+                sharpe_ratio_adj = sharpe_ratio_adj * sqrt_n
+                sortino_ratio = sortino_ratio * sqrt_n
+                sortino_ratio_adj = sortino_ratio_adj * sqrt_n
 
                 user = request.user
                 amount = BACKTEST_BASE_COST * attempts

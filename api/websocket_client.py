@@ -16,7 +16,7 @@ async def on_open(ws):
         await ws.send(json.dumps({
             "action": "subscribe",
             "params": {
-                "symbols": ",".join(SYMBOLS),
+                "symbols": ",".join(list(SYMBOLS.keys())),
                 "apikey": TWELVE_DATA_API_KEY
             }
         }))
