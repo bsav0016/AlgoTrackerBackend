@@ -191,7 +191,7 @@ class Strategy(models.Model):
 
         if current_close["buy"] and not current_close["sell"] and self.position < 2:
             self.position = 3
-            self.send_notifications("New Buy Trigger!", f"{self.title} triggered a buy signal!")
+            self.send_notifications(f"{self.title} triggered a buy signal!")
             trade = Trade(
                 strategy=self,
                 price=current_close["close"],
@@ -200,7 +200,7 @@ class Strategy(models.Model):
             trade.save()
         elif current_close["sell"] and not current_close["buy"] and self.position >= 2:
             self.position = 0
-            self.send_notifications("New Sell Trigger!", f"{self.title} triggered a sell signal!")
+            self.send_notifications(f"{self.title} triggered a sell signal!")
             trade = Trade(
                 strategy=self,
                 price=current_close["close"],
@@ -218,10 +218,10 @@ class Strategy(models.Model):
         self.save()
         logger.info("Finished processing data")
 
-    def send_notifications(self, title, body):
+    def send_notifications(self, message):
         user: "CustomUser" = self.user
         for device_id in user.device_ids:
-            NotificationService.send_notification(device_id, title, body)
+            NotificationService.send_push_message(device_id, message)
 
     def charge_user(self, amount):
         self.charge_user_date = timezone.now() + timedelta(days=30)

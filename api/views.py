@@ -20,6 +20,7 @@ from django.core.mail import send_mail
 from api.redis_manager import RedisManager
 import stripe
 from stripe import StripeError
+from api.services.notification_service import NotificationService
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 INTERVAL_MAP = settings.INTERVAL_MAP
@@ -136,6 +137,7 @@ class DeviceIDView(APIView):
 
         user = request.user
         if device_id not in user.device_ids:
+            print(device_id)
             user.add_device_id(device_id)
             return Response({"message": "Device ID added successfully"}, status=status.HTTP_200_OK)
         else:
