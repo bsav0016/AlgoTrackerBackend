@@ -32,12 +32,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: don't run with debug turned on in production!
 if DEV_ENV:
     DEBUG = True
-    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "192.168.1.144"]
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "192.168.1.144", "algo-tracker-c96c1f4d7f6e.herokuapp.com"]
     env_path = BASE_DIR / 'algo_tracker_backend' / 'dev_env.env'
     load_dotenv(dotenv_path=env_path)
 else:
     DEBUG = False
-    ALLOWED_HOSTS = ["https://algo-tracker-c96c1f4d7f6e.herokuapp.com"]
+    ALLOWED_HOSTS = ["algo-tracker-c96c1f4d7f6e.herokuapp.com"]
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv('SECRET_KEY', default='')
