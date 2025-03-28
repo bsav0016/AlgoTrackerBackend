@@ -20,7 +20,6 @@ from django.core.mail import send_mail
 from api.redis_manager import RedisManager
 import stripe
 from stripe import StripeError
-from api.services.notification_service import NotificationService
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 INTERVAL_MAP = settings.INTERVAL_MAP
