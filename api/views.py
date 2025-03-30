@@ -136,7 +136,6 @@ class DeviceIDView(APIView):
 
         user = request.user
         if device_id not in user.device_ids:
-            print(device_id)
             user.add_device_id(device_id)
             return Response({"message": "Device ID added successfully"}, status=status.HTTP_200_OK)
         else:

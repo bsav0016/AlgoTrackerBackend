@@ -9,11 +9,11 @@ class ApiConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "api"
 
-    def ready(self):
-        """Starts the WebSocket client in a separate thread when Django starts."""
-        if "runserver" in sys.argv:
-            self.ws_thread = threading.Thread(target=self.start_websocket, daemon=True)
-            self.ws_thread.start()
+    #def ready(self):
+    #    """Starts the WebSocket client in a separate thread when Django starts."""
+    #    if "runserver" in sys.argv:
+    #        self.ws_thread = threading.Thread(target=self.start_websocket, daemon=True)
+    #        self.ws_thread.start()
         #self.redis_thread = threading.Thread(target=self.run_populate_redis, daemon=True)
         #self.redis_thread.start()
 

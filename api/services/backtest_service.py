@@ -265,9 +265,10 @@ class BacktestService:
 
         first_value = backtest_results.iloc[0]["close"]
         final_value = backtest_results.iloc[-1]["close"]
+        strategy_final_value = backtest_results.iloc[-1]["return"]
 
-        percent_return = backtest_results.iloc[-1]["return"] - 1
-        asset_return = (final_value - first_value) / first_value - 1
+        percent_return = (strategy_final_value - first_value) / first_value
+        asset_return = (final_value - first_value) / first_value
         percent_return_adj = percent_return - asset_return
 
         return percent_return * 100, percent_return_adj * 100
