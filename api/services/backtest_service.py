@@ -263,15 +263,11 @@ class BacktestService:
         if backtest_results.empty or "return" not in backtest_results or "close" not in backtest_results:
             raise ValueError("Backtest results must contain return and stock price data.")
 
-        strategy_returns = backtest_results["return"].dropna().pct_change()
-        asset_returns = backtest_results["close"].dropna().pct_change()
+        first_value = backtest_results.iloc[0]["close"]
+        final_value = backtest_results.iloc[-1]["close"]
 
-        min_length = min(len(strategy_returns), len(asset_returns))
-        strategy_returns = strategy_returns.iloc[:min_length]
-        asset_returns = asset_returns.iloc[:min_length]
-        percent_return = strategy_returns.sum()
-
-        asset_return = asset_returns.sum()
+        percent_return = backtest_results.iloc[-1]["return"] - 1
+        asset_return = (final_value - first_value) / first_value - 1
         percent_return_adj = percent_return - asset_return
 
         return percent_return * 100, percent_return_adj * 100
