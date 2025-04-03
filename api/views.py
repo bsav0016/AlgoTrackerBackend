@@ -110,6 +110,32 @@ class LogoutView(APIView):
             return Response({"detail": "Error: " + str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class DeleteAccountView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        user = request.user
+        data = request.data
+        password = data.get("password", "")
+
+        if not user.is_superuser:
+            if not user.check_password(password):
+                return Response({"detail": "Invalid password"}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            tokens = OutstandingToken.objects.filter(user=user)
+            for token in tokens:
+                BlacklistedToken.objects.get_or_create(token=token)
+
+            user.delete()
+            return Response({"detail": "Account successfully deleted"}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"detail": f"Error deleting account: {str(e)}"},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class UserDetailsView(APIView):
     authentication_classes = [JWTAuthentication, ]
     permission_classes = [IsAuthenticated, ]

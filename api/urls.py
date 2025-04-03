@@ -1,7 +1,7 @@
 from django.urls import path
 from api.views import (UserRegistrationView, LoginView, LogoutView, BacktestView, StrategyView, DeviceIDView,
                        AvailableSymbolsAndIntervalsView, PasswordResetRequestView, PasswordResetConfirmView,
-                       StripePaymentView,StripePaymentConfirmationView, UserDetailsView)
+                       StripePaymentView,StripePaymentConfirmationView, UserDetailsView, DeleteAccountView)
 from rest_framework_simplejwt.views import TokenRefreshView
 
 
@@ -9,6 +9,7 @@ urlpatterns = [
     path('register/', UserRegistrationView.as_view(), name='user-registration'),
     path('login/', LoginView.as_view(), name='login'),
     path('logout/', LogoutView.as_view(), name='logout'),
+    path('delete-account/', DeleteAccountView.as_view(), name='delete-account'),
     path('user-details/', UserDetailsView.as_view(), name='user-details'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
