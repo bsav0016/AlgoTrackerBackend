@@ -9,7 +9,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 import io
 import base64
-from decimal import Decimal
 import pytz
 
 TWELVE_DATA_API_KEY = settings.TWELVE_DATA_API_KEY
@@ -275,16 +274,15 @@ class BacktestService:
 
     @staticmethod
     def charge_user(user, amount):
-        amount_decimal = Decimal(str(amount))
-        funds_diff = user.monthly_funds - amount_decimal
+        funds_diff = user.monthly_credits - int(amount)
         if funds_diff > 0:
-            user.monthly_funds = funds_diff
+            user.monthly_credits = funds_diff
             user.save()
-            return True, user.account_funds, user.monthly_funds
-        elif user.monthly_funds + user.account_funds >= amount_decimal:
-            user.monthly_funds = 0
-            user.account_funds -= funds_diff
+            return True, user.account_credits, user.monthly_credits
+        elif user.monthly_credits + user.account_credits >= amount:
+            user.monthly_credits = 0
+            user.account_credits -= funds_diff
             user.save()
-            return True, user.account_funds, user.monthly_funds
+            return True, user.account_credits, user.monthly_credits
         else:
             return False, None, None

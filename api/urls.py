@@ -18,6 +18,7 @@ urlpatterns = [
 
     path('backtest/', BacktestView.as_view(), name='backtest'),
     path('strategy/', StrategyView.as_view(), name='strategy'),
+    path('strategy/<int:pk>/', StrategyView.as_view(), name='strategy-detail'),
     path('device-id/', DeviceIDView.as_view(), name='device-id'),
     path('symbols-and-intervals/', AvailableSymbolsAndIntervalsView.as_view(), name='symbols-and-intervals'),
     path('payment-intent/', StripePaymentView.as_view(), name='payment-intent'),

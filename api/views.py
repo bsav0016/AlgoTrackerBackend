@@ -51,7 +51,7 @@ class UserRegistrationView(APIView):
             tokens = AuthService.create_tokens(user=user)
 
             if promo_code in list(PROMO_CODES.keys()):
-                promo_code_value = Decimal(PROMO_CODES[promo_code])
+                promo_code_value = int(PROMO_CODES[promo_code])
                 user.add_funds(promo_code_value)
 
             user_data = CustomUserSerializer(user).data
@@ -77,7 +77,7 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.validate(data=request.data)
-            user.check_monthly_funds()
+            user.check_monthly_credits()
             tokens = AuthService.create_tokens(user=user)
             user_data = CustomUserSerializer(user).data
 
@@ -142,7 +142,7 @@ class UserDetailsView(APIView):
 
     def get(self, request):
         user = request.user
-        user.check_monthly_funds()
+        user.check_monthly_credits()
         user_data = CustomUserSerializer(user).data
 
         return Response({**user_data}, status=status.HTTP_200_OK)
@@ -253,7 +253,7 @@ class BacktestView(APIView):
 
                 user = request.user
                 amount = BACKTEST_BASE_COST * attempts
-                sufficient_funds, account_funds, monthly_funds = BacktestService.charge_user(user, amount)
+                sufficient_funds, account_credits, monthly_credits = BacktestService.charge_user(user, amount)
 
                 if not sufficient_funds:
                     return Response({"detail": f"Requires ${amount}"}, status=status.HTTP_402_PAYMENT_REQUIRED)
@@ -268,8 +268,8 @@ class BacktestView(APIView):
                     "sharpe_ratio_adj": sharpe_ratio_adj,
                     "sortino_ratio": sortino_ratio,
                     "sortino_ratio_adj": sortino_ratio_adj,
-                    "user_account_funds": account_funds,
-                    "user_monthly_funds": monthly_funds
+                    "user_account_credits": account_credits,
+                    "user_monthly_credits": monthly_credits
                 }
 
                 return Response(response_data, status=status.HTTP_200_OK)
@@ -300,8 +300,8 @@ class StrategyView(APIView):
                     symbol=symbol,
                     interval=interval
                 )
-                strategy.add_signals(signals)
                 strategy.save()
+                strategy.add_signals(signals)
 
                 return Response({"message": "Successfully subscribed strategy"}, status=status.HTTP_200_OK)
 
@@ -392,6 +392,8 @@ class StripePaymentView(APIView):
         try:
             amount = request.data.get("amount")
             amount = int(amount)
+            if amount < 300:
+                raise
             customer = stripe.Customer.create()
             ephemeral_key = stripe.EphemeralKey.create(
                 customer=customer['id'],
@@ -434,7 +436,6 @@ class StripePaymentConfirmationView(APIView):
         payload = request.body
         sig_header = request.headers['STRIPE_SIGNATURE']
 
-        print(sig_header)
         try:
             event = stripe.Webhook.construct_event(
                 payload, sig_header, STRIPE_WEBHOOK_SECRET

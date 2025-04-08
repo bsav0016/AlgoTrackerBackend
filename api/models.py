@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-MONTHLY_FUNDS = settings.MONTHLY_FUNDS
+MONTHLY_CREDITS = settings.MONTHLY_CREDITS
 INTERVAL_MAP = settings.INTERVAL_MAP
 
 
@@ -48,9 +48,9 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     last_name = models.CharField(max_length=100)
     email = models.EmailField(unique=True)
     account_created = models.DateTimeField(default=timezone.now)
-    account_funds = models.DecimalField(default=0, max_digits=10, decimal_places=2)
-    monthly_funds = models.DecimalField(default=MONTHLY_FUNDS, max_digits=10, decimal_places=2)
-    reset_monthly_funds = models.DateTimeField(default=get_thirty_days_away)
+    account_credits = models.IntegerField(default=0, null=False)
+    monthly_credits = models.IntegerField(default=MONTHLY_CREDITS, null=False)
+    reset_monthly_credits = models.DateTimeField(default=get_thirty_days_away, null=False)
     device_ids = models.JSONField(default=list, blank=True)
 
     is_active = models.BooleanField(default=True)
@@ -86,17 +86,18 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
             self.device_ids.remove(device_id)
             self.save(update_fields=["device_ids"])
 
-    def check_monthly_funds(self):
+    def check_monthly_credits(self):
         """Reset monthly funds if the reset date has passed."""
-        if timezone.now() > self.reset_monthly_funds:
-            self.monthly_funds = F("monthly_funds") + MONTHLY_FUNDS  # Atomic update
-            self.reset_monthly_funds = timezone.now() + timedelta(days=30)
-            self.save(update_fields=["monthly_funds", "reset_monthly_funds"])
+        if timezone.now() > self.reset_monthly_credits:
+            self.monthly_credits = F("monthly_credits") + MONTHLY_CREDITS  # Atomic update
+            self.reset_monthly_credits = timezone.now() + timedelta(days=30)
+            self.save(update_fields=["monthly_credits", "reset_monthly_credits"])
 
     def add_funds(self, amount):
         if amount > 0:
-            self.account_funds += Decimal(amount)
-            self.save(update_fields=["account_funds"])
+            credit_amount = int(amount)
+            self.account_credits += credit_amount
+            self.save(update_fields=["account_credits"])
 
     def __str__(self):
         return self.username
@@ -226,18 +227,18 @@ class Strategy(models.Model):
     def charge_user(self, amount):
         self.charge_user_date = timezone.now() + timedelta(days=30)
         user: "CustomUser" = self.user
-        funds_diff = user.monthly_funds - amount
+        funds_diff = user.monthly_credits - int(amount)
         if funds_diff > 0:
-            user.monthly_funds = funds_diff
+            user.monthly_credits = funds_diff
         else:
-            user.monthly_funds = 0
-            user.account_funds -= funds_diff
+            user.monthly_credits = 0
+            user.account_credits -= funds_diff
 
-        if user.account_funds < 0:
-            user.account_funds = 0
+        if user.account_credits < 0:
+            user.account_credits = 0
             self.delete()
 
-        user.save(update_fields=["monthly_funds", "account_funds"])
+        user.save(update_fields=["monthly_credits", "account_credits"])
 
 
 
@@ -275,4 +276,4 @@ class IndicatorValue(models.Model):
 class PaymentIntent(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="payment_intents")
     payment_intent_id = models.CharField(max_length=255)
-    amount = models.DecimalField(default=0, max_digits=10, decimal_places=2)
+    amount = models.IntegerField(default=0)
