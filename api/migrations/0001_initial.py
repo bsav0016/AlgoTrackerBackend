@@ -45,7 +45,7 @@ class Migration(migrations.Migration):
                 ('last_name', models.CharField(max_length=100)),
                 ('email', models.EmailField(max_length=254, unique=True)),
                 ('account_created', models.DateTimeField(auto_now_add=True)),
-                ('account_credits', models.DecimalField(decimal_places=2, default=0, max_digits=10)),
+                ('account_funds', models.DecimalField(decimal_places=2, default=0, max_digits=10)),
                 ('free_backtests', models.PositiveSmallIntegerField(default=5)),
                 ('is_active', models.BooleanField(default=True)),
                 ('is_staff', models.BooleanField(default=False)),

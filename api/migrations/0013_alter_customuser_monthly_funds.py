@@ -12,7 +12,7 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AlterField(
             model_name='customuser',
-            name='monthly_credits',
+            name='monthly_funds',
             field=models.DecimalField(decimal_places=2, default=500, max_digits=10),
         ),
     ]

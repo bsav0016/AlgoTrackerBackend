@@ -6,18 +6,18 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0014_1_rename_customuser_account_credits'),
+        ('api', '0013_alter_customuser_monthly_funds'),
     ]
 
     operations = [
         migrations.AlterField(
             model_name='customuser',
-            name='account_credits',
+            name='account_funds',
             field=models.IntegerField(default=0),
         ),
         migrations.AlterField(
             model_name='customuser',
-            name='monthly_credits',
+            name='monthly_funds',
             field=models.IntegerField(default=500),
         ),
     ]

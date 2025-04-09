@@ -17,12 +17,12 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name='customuser',
-            name='monthly_credits',
+            name='monthly_funds',
             field=models.DecimalField(decimal_places=2, default=5, max_digits=10),
         ),
         migrations.AddField(
             model_name='customuser',
-            name='reset_monthly_credits',
+            name='reset_monthly_funds',
             field=models.DateTimeField(default=api.models.get_thirty_days_away),
         ),
         migrations.AddField(
