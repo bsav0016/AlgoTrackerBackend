@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0013_alter_customuser_monthly_credits'),
+        ('api', '0014_1_rename_customuser_account_credits'),
     ]
 
     operations = [
