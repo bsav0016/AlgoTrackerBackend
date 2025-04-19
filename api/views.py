@@ -8,14 +8,13 @@ from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, Bl
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from api.serializers import (UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
                              BacktestRequestSerializer, StrategyRequestSerializer)
-from api.models import Strategy, CustomUser, PaymentIntent
+from api.models import Strategy, CustomUser, PaymentIntent, RevenueCatDeposit, RevenueCatConfirmation
 from api.services.auth_service import AuthService
 from api.services.backtest_service import BacktestService
 from api.indicators.signal import Signal
 from rest_framework_simplejwt.authentication import JWTAuthentication
 import random
 import numpy as np
-from decimal import Decimal
 from django.core.mail import send_mail
 from api.redis_manager import RedisManager
 import stripe
@@ -29,6 +28,7 @@ EMAIL_HOST = settings.EMAIL_HOST
 STRIPE_WEBHOOK_SECRET = settings.STRIPE_WEBHOOK_SECRET
 BACKTEST_ITERATIONS = settings.BACKTEST_ITERATIONS
 PROMO_CODES = settings.PROMO_CODES
+PROMO_CODE_AVAILABILITY = settings.PROMO_CODE_AVAILABILITY
 
 
 class UserRegistrationView(APIView):
@@ -68,6 +68,13 @@ class UserRegistrationView(APIView):
             print(e)
             return Response({"detail": "Error registering user"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+class PromoCodeAvailabilityView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny,]
+
+    def get(self, request):
+        return Response({"availability": PROMO_CODE_AVAILABILITY}, status=status.HTTP_200_OK)
 
 class LoginView(APIView):
     authentication_classes = []
@@ -464,3 +471,96 @@ class StripePaymentConfirmationView(APIView):
                 return Response({"detail": "PaymentIntent not found."}, status=status.HTTP_404_NOT_FOUND)
         else:
             return Response({"message": "Other event type"}, status=status.HTTP_200_OK)
+
+
+class RevenueCatDepositView(APIView):
+    authentication_classes = [JWTAuthentication, ]
+    permission_classes = [IsAuthenticated, ]
+
+    def post(self, request):
+        user = request.user
+        data = request.data
+        transaction_id = data.get("transaction_id")
+
+        try:
+            deposit = RevenueCatDeposit.objects.get(transaction_id=transaction_id)
+
+        except ObjectDoesNotExist:
+            deposit = RevenueCatDeposit(
+                user=user,
+                transaction_id=transaction_id
+            )
+            deposit.save()
+
+        if deposit.added:
+            return Response({"detail": "Transaction already processed"}, status=status.HTTP_409_CONFLICT)
+
+        try:
+            confirmation = RevenueCatConfirmation.objects.get(transaction_id=transaction_id)
+            if confirmation.added:
+                deposit.set_added()
+                return Response({"detail": "Transaction already processed"}, status=status.HTTP_409_CONFLICT)
+
+            user.add_funds(confirmation.transaction_credits)
+            deposit.set_added()
+            confirmation.set_added()
+            return Response({"message": "Deposit completed successfully"}, status=status.HTTP_200_OK)
+
+        except ObjectDoesNotExist:
+            return Response({"message": "Deposit created but not completed"}, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            print(e)
+            return Response({"detail": "Internal Server Error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class RevenueCatConfirmationView(APIView):
+    def post(self, request):
+        data = request.data
+        event = data.get("event")
+        product_id = event["product_id"]
+        transaction_id = event["transaction_id"]
+
+        if product_id == "FundsDeposit":
+            transaction_credits = 500
+        elif product_id == "10AlgoTrackerDeposit":
+            transaction_credits = 1000
+        elif product_id == "100AlgoTrackerDeposit":
+            transaction_credits = 10000
+        elif product_id == "20AlgoTrackerDeposit":
+            transaction_credits = 2000
+        elif product_id == "50AlgoTrackerDeposit":
+            transaction_credits = 5000
+        else:
+            return Response({"detail": "Did not recognize product ID"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            confirmation = RevenueCatConfirmation.objects.get(transaction_id=transaction_id)
+
+        except ObjectDoesNotExist:
+            confirmation = RevenueCatConfirmation(
+                transaction_id=transaction_id,
+                transaction_credits=transaction_credits
+            )
+            confirmation.save()
+
+        if confirmation.added:
+            return Response({"detail": "Transaction already processed"}, status=status.HTTP_409_CONFLICT)
+
+        try:
+            deposit = RevenueCatDeposit.objects.get(transaction_id=transaction_id)
+            if deposit.added:
+                confirmation.set_added()
+                return Response({"detail": "Transaction already processed"}, status=status.HTTP_409_CONFLICT)
+
+            deposit.user.add_funds(confirmation.transaction_credits)
+            deposit.set_added()
+            confirmation.set_added()
+            return Response({"message": "Deposit completed successfully"}, status=status.HTTP_200_OK)
+
+        except ObjectDoesNotExist:
+            return Response({"message": "Confirmation created but not completed"}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            print(e)
+            return Response({"detail": "Internal Server Error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

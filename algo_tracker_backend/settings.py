@@ -242,3 +242,8 @@ PROMO_CODES = {
     key: value
     for key, value in (pair.split(":") for pair in promo_code_str.split(","))
 }
+PROMO_CODE_AVAILABILITY_STR = os.getenv('PROMO_CODE_AVAILABILITY', default='False')
+if PROMO_CODE_AVAILABILITY_STR == 'True' or PROMO_CODE_AVAILABILITY_STR == 'true':
+    PROMO_CODE_AVAILABILITY = True
+else:
+    PROMO_CODE_AVAILABILITY = False

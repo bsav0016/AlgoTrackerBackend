@@ -43,14 +43,14 @@ class CustomUserManager(BaseUserManager):
 
 
 class CustomUser(AbstractBaseUser, PermissionsMixin):
-    username = models.CharField(max_length=150, unique=True)
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
-    email = models.EmailField(unique=True)
-    account_created = models.DateTimeField(default=timezone.now)
-    account_credits = models.IntegerField(default=0, null=False)
-    monthly_credits = models.IntegerField(default=MONTHLY_CREDITS, null=False)
-    reset_monthly_credits = models.DateTimeField(default=get_thirty_days_away, null=False)
+    username = models.CharField(max_length=150, unique=True, null=False, blank=False)
+    first_name = models.CharField(max_length=100, null=False, blank=False)
+    last_name = models.CharField(max_length=100, null=False, blank=False)
+    email = models.EmailField(unique=True, null=False, blank=False)
+    account_created = models.DateTimeField(default=timezone.now, null=False, blank=False)
+    account_credits = models.IntegerField(default=0, null=False, blank=False)
+    monthly_credits = models.IntegerField(default=MONTHLY_CREDITS, null=False, blank=False)
+    reset_monthly_credits = models.DateTimeField(default=get_thirty_days_away, null=False, blank=False)
     device_ids = models.JSONField(default=list, blank=True)
 
     is_active = models.BooleanField(default=True)
@@ -96,6 +96,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     def add_funds(self, amount):
         if amount > 0:
             credit_amount = int(amount)
+            print(type(self.account_credits))
             self.account_credits += credit_amount
             self.save(update_fields=["account_credits"])
 
@@ -277,3 +278,23 @@ class PaymentIntent(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="payment_intents")
     payment_intent_id = models.CharField(max_length=255)
     amount = models.IntegerField(default=0)
+
+
+class RevenueCatDeposit(models.Model):
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="revenue_cat_deposit")
+    transaction_id = models.CharField(max_length=50, unique=True)
+    added = models.BooleanField(default=False, null=False, blank=False)
+
+    def set_added(self):
+        self.added = True
+        self.save()
+
+
+class RevenueCatConfirmation(models.Model):
+    transaction_id = models.CharField(max_length=50, unique=True)
+    transaction_credits = models.IntegerField(default=0, null=False, blank=False)
+    added = models.BooleanField(default=False, null=False, blank=False)
+
+    def set_added(self):
+        self.added = True
+        self.save()

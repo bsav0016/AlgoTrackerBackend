@@ -1,12 +1,14 @@
 from django.urls import path
 from api.views import (UserRegistrationView, LoginView, LogoutView, BacktestView, StrategyView, DeviceIDView,
                        AvailableSymbolsAndIntervalsView, PasswordResetRequestView, PasswordResetConfirmView,
-                       StripePaymentView,StripePaymentConfirmationView, UserDetailsView, DeleteAccountView)
+                       StripePaymentView,StripePaymentConfirmationView, UserDetailsView, DeleteAccountView,
+                       PromoCodeAvailabilityView, RevenueCatDepositView, RevenueCatConfirmationView)
 from rest_framework_simplejwt.views import TokenRefreshView
 
 
 urlpatterns = [
     path('register/', UserRegistrationView.as_view(), name='user-registration'),
+    path('promo-code-availability', PromoCodeAvailabilityView.as_view(), name='promo-code-availability'),
     path('login/', LoginView.as_view(), name='login'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path('delete-account/', DeleteAccountView.as_view(), name='delete-account'),
@@ -22,5 +24,7 @@ urlpatterns = [
     path('device-id/', DeviceIDView.as_view(), name='device-id'),
     path('symbols-and-intervals/', AvailableSymbolsAndIntervalsView.as_view(), name='symbols-and-intervals'),
     path('payment-intent/', StripePaymentView.as_view(), name='payment-intent'),
-    path('payment-confirmation/', StripePaymentConfirmationView.as_view(), name='payment-confirmation')
+    path('payment-confirmation/', StripePaymentConfirmationView.as_view(), name='payment-confirmation'),
+    path('revenuecat-deposit/', RevenueCatDepositView.as_view(), name='revenuecat-deposit'),
+    path('revenuecat-confirmation/', RevenueCatConfirmationView.as_view(), name='revenuecat-confirmation'),
 ]
