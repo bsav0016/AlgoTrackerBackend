@@ -10,7 +10,8 @@ from the root directory:
 `python manage.py makemigrations api`
 `python manage.py migrate`
 
-4. Start a local redis server on port 6379.
+4. Start a local redis server on port 6379. Can be checked from command line using:
+`redis-cli`
 
 5. To run on your local machine, execute the following command 
 from the root directory:<br>

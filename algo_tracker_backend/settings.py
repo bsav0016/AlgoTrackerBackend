@@ -17,8 +17,7 @@ from firebase_admin import credentials
 from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
-import redis
-import urllib.parse as urlparse
+from urllib.parse import urlparse
 
 
 if "DYNO" in os.environ and "CI" not in os.environ:
@@ -184,18 +183,17 @@ CELERY_TASK_SERIALIZER = 'json'
 
 #Redis
 REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
-urlparse.uses_netloc.append("redis")
-url = urlparse.urlparse(REDIS_URL)
+parsed_url = urlparse(REDIS_URL)
 
 RQ_QUEUES = {
     'default': {
-        'HOST': url.hostname,
-        'PORT': url.port,
-        'DB': 0,
-        'PASSWORD': url.password,
-        'USE_SSL': True,
+        'HOST': parsed_url.hostname,
+        'PORT': parsed_url.port,
+        'DB': int(parsed_url.path.lstrip('/')) if parsed_url.path else 0,
+        'PASSWORD': parsed_url.password,
+        'USE_SSL': parsed_url.scheme == 'rediss',
         'SSL_CERT_REQS': None
-    }
+    },
 }
 
 
@@ -227,7 +225,7 @@ else:
 #Gmail
 EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', default='')
 EMAIL_HOST = os.getenv('EMAIL_HOST', default='')
-EMAIL_PORT = int(os.getenv('EMAIL_PORT', default=0))
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', default=10000))
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', default=False) == 'True'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', default='')
