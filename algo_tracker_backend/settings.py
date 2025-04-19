@@ -17,6 +17,9 @@ from firebase_admin import credentials
 from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
+import redis
+import urllib.parse as urlparse
+
 
 if "DYNO" in os.environ and "CI" not in os.environ:
     DEV_ENV = False
@@ -181,6 +184,19 @@ CELERY_TASK_SERIALIZER = 'json'
 
 #Redis
 REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
+urlparse.uses_netloc.append("redis")
+url = urlparse.urlparse(REDIS_URL)
+
+RQ_QUEUES = {
+    'default': {
+        'HOST': url.hostname,
+        'PORT': url.port,
+        'DB': 0,
+        'PASSWORD': url.password,
+        'USE_SSL': True,
+        'SSL_CERT_REQS': None
+    }
+}
 
 
 #Loading variables for Frontend as well
