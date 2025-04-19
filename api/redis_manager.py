@@ -7,8 +7,16 @@ from api.tasks import process_strategy_task
 import requests
 from datetime import datetime, timezone
 import asyncio
+from urllib.parse import urlparse
 
-redis_client = redis.Redis.from_url(settings.REDIS_URL)
+redis_url = urlparse(settings.REDIS_URL)
+redis_client = redis.Redis(
+    host=redis_url.hostname,
+    port=redis_url.port,
+    password=redis_url.password,
+    ssl=(redis_url.scheme == "rediss"),
+    ssl_cert_reqs=None
+)
 
 TWELVE_DATA_API_KEY = settings.TWELVE_DATA_API_KEY
 SYMBOLS = settings.SYMBOLS
