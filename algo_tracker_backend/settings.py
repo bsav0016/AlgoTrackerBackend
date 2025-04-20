@@ -190,8 +190,10 @@ CACHES = {
         "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_URL,
         "OPTIONS": {
-                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "CONNECTION_POOL_KWARGS": {
                 "ssl_cert_reqs": None
+            },
         }
     }
 }
@@ -204,11 +206,6 @@ RQ_QUEUES = {
         'PASSWORD': parsed_url.password,
         'USE_SSL': parsed_url.scheme == 'rediss',
         'SSL_CERT_REQS': None
-    },
-    'low': {
-        'HOST': 'localhost',
-        'PORT': 6379,
-        'DB': 0,
     }
 }
 
