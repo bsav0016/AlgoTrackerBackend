@@ -177,15 +177,14 @@ SIMPLE_JWT = {
 
 
 #Celery
-CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
+#CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
+#CELERY_ACCEPT_CONTENT = ['json']
+#CELERY_TASK_SERIALIZER = 'json'
 
-if CELERY_BROKER_URL.startswith("rediss"):
-    CELERY_BROKER_USE_SSL = {'ssl_cert_reqs': ssl.CERT_NONE}
-else:
-    CELERY_BROKER_USE_SSL = None
-
+#if CELERY_BROKER_URL.startswith("rediss"):
+#    CELERY_BROKER_USE_SSL = {'ssl_cert_reqs': ssl.CERT_NONE}
+#else:
+#    CELERY_BROKER_USE_SSL = None
 
 
 #Redis
