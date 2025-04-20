@@ -2,6 +2,7 @@ from celery import shared_task
 import pandas as pd
 from io import StringIO
 
+
 @shared_task
 def process_strategy_task(strategy_id, prices_json):
     from api.models import Strategy

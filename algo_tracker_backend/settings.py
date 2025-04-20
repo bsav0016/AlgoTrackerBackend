@@ -181,14 +181,11 @@ CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 
-parsed_url = urlparse(CELERY_BROKER_URL)
-if parsed_url.scheme == "rediss":
-    broker_use_ssl = {'ssl_cert_reqs': ssl.CERT_NONE}
+if CELERY_BROKER_URL.startswith("rediss"):
+    CELERY_BROKER_USE_SSL = {'ssl_cert_reqs': ssl.CERT_NONE}
 else:
-    broker_use_ssl = None
+    CELERY_BROKER_USE_SSL = None
 
-if broker_use_ssl:
-    CELERY_BROKER_USE_SSL = broker_use_ssl
 
 
 #Redis
@@ -214,7 +211,7 @@ RQ_QUEUES = {
         'PORT': parsed_url.port,
         'DB': int(parsed_url.path.lstrip('/')) if parsed_url.path else 0,
         'PASSWORD': parsed_url.password,
-        'USE_SSL': parsed_url.scheme == 'rediss',
+        'USE_SSL': REDIS_URL.startswith("rediss"),
         'SSL_CERT_REQS': None
     }
 }
