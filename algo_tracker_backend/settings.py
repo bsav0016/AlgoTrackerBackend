@@ -13,6 +13,7 @@ import os
 import dj_database_url
 import json
 import firebase_admin
+import ssl
 from firebase_admin import credentials
 from datetime import timedelta
 from pathlib import Path
@@ -179,6 +180,15 @@ SIMPLE_JWT = {
 CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
+
+parsed_url = urlparse(CELERY_BROKER_URL)
+if parsed_url.scheme == "rediss":
+    broker_use_ssl = {'ssl_cert_reqs': ssl.CERT_NONE}
+else:
+    broker_use_ssl = None
+
+if broker_use_ssl:
+    CELERY_BROKER_USE_SSL = broker_use_ssl
 
 
 #Redis
