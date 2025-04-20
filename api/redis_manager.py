@@ -1,4 +1,3 @@
-import redis
 import json
 from django.conf import settings
 import pandas as pd
@@ -7,16 +6,10 @@ from api.tasks import process_strategy_task
 import requests
 from datetime import datetime, timezone
 import asyncio
-from urllib.parse import urlparse
+from django_redis import get_redis_connection
 
-redis_url = urlparse(settings.REDIS_URL)
-redis_client = redis.Redis(
-    host=redis_url.hostname,
-    port=redis_url.port,
-    password=redis_url.password,
-    ssl=(redis_url.scheme == "rediss"),
-    ssl_cert_reqs=None
-)
+
+redis_client = get_redis_connection("default")
 
 TWELVE_DATA_API_KEY = settings.TWELVE_DATA_API_KEY
 SYMBOLS = settings.SYMBOLS

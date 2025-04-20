@@ -185,6 +185,17 @@ CELERY_TASK_SERIALIZER = 'json'
 REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 parsed_url = urlparse(REDIS_URL)
 
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "ssl_cert_reqs": None
+        }
+    }
+}
+
 RQ_QUEUES = {
     'default': {
         'HOST': parsed_url.hostname,
@@ -194,8 +205,12 @@ RQ_QUEUES = {
         'USE_SSL': parsed_url.scheme == 'rediss',
         'SSL_CERT_REQS': None
     },
+    'low': {
+        'HOST': 'localhost',
+        'PORT': 6379,
+        'DB': 0,
+    }
 }
-
 
 #Loading variables for Frontend as well
 available_symbol_str = os.getenv("SYMBOLS", "")
