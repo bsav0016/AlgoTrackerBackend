@@ -208,7 +208,7 @@ RQ_QUEUES = {
     'default': {
         'HOST': parsed_url.hostname,
         'PORT': parsed_url.port,
-        'DB': int(parsed_url.path.lstrip('/')) if parsed_url.path else 0,
+        'DB': 0,
         'PASSWORD': parsed_url.password,
         'USE_SSL': REDIS_URL.startswith("rediss"),
         'SSL_CERT_REQS': None
