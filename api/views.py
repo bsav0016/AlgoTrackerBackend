@@ -4,11 +4,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.conf import settings
+from django.db import transaction
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from api.serializers import (UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
                              BacktestRequestSerializer, StrategyRequestSerializer)
-from api.models import Strategy, CustomUser, PaymentIntent, RevenueCatDeposit, RevenueCatConfirmation
+from api.models import Strategy, CustomUser, PaymentIntent, RevenueCatCustomer, RevenueCatConfirmation
 from api.services.auth_service import AuthService
 from api.services.backtest_service import BacktestService
 from api.indicators.signal import Signal
@@ -473,41 +474,30 @@ class StripePaymentConfirmationView(APIView):
             return Response({"message": "Other event type"}, status=status.HTTP_200_OK)
 
 
-class RevenueCatDepositView(APIView):
+class RevenueCatCustomerView(APIView):
     authentication_classes = [JWTAuthentication, ]
     permission_classes = [IsAuthenticated, ]
 
     def post(self, request):
         user = request.user
         data = request.data
-        transaction_id = data.get("transaction_id")
+        customer_id = data.get("customer_id")
+
+        customer = RevenueCatCustomer.objects.get_or_create(
+            customer_id=customer_id,
+            defaults={'user': user}
+        )
+
+        confirmations = RevenueCatConfirmation.objects.filter(customer_id=customer_id)
+        if not confirmations.exists():
+            return Response({"message": "Customer created but transaction not completed"}, status=status.HTTP_201_CREATED)
 
         try:
-            deposit = RevenueCatDeposit.objects.get(transaction_id=transaction_id)
-
-        except ObjectDoesNotExist:
-            deposit = RevenueCatDeposit(
-                user=user,
-                transaction_id=transaction_id
-            )
-            deposit.save()
-
-        if deposit.added:
-            return Response({"detail": "Transaction already processed"}, status=status.HTTP_409_CONFLICT)
-
-        try:
-            confirmation = RevenueCatConfirmation.objects.get(transaction_id=transaction_id)
-            if confirmation.added:
-                deposit.set_added()
-                return Response({"detail": "Transaction already processed"}, status=status.HTTP_409_CONFLICT)
-
-            user.add_funds(confirmation.transaction_credits)
-            deposit.set_added()
-            confirmation.set_added()
-            return Response({"message": "Deposit completed successfully"}, status=status.HTTP_200_OK)
-
-        except ObjectDoesNotExist:
-            return Response({"message": "Deposit created but not completed"}, status=status.HTTP_201_CREATED)
+            with transaction.atomic():
+                total_credits = sum(c.transaction_credits for c in confirmations)
+                user.add_funds(total_credits)
+                confirmations.delete()
+            return Response({"message": "Transaction completed successfully"}, status=status.HTTP_200_OK)
 
         except Exception as e:
             print(e)
@@ -520,7 +510,11 @@ class RevenueCatConfirmationView(APIView):
         event = data.get("event")
         product_id = event["product_id"]
         transaction_id = event["transaction_id"]
-        print(event)
+        customer_id = event["app_user_id"]
+
+        if not all([product_id, transaction_id, customer_id]):
+            return Response({"detail": "Missing required fields"}, status=status.HTTP_400_BAD_REQUEST)
+
         if product_id == "FundsDeposit":
             transaction_credits = 500
         elif product_id == "10AlgoTrackerDeposit":
@@ -535,32 +529,24 @@ class RevenueCatConfirmationView(APIView):
             return Response({"detail": "Did not recognize product ID"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            confirmation = RevenueCatConfirmation.objects.get(transaction_id=transaction_id)
-
-        except ObjectDoesNotExist:
-            confirmation = RevenueCatConfirmation(
+            confirmation, created = RevenueCatConfirmation.objects.get_or_create(
                 transaction_id=transaction_id,
-                transaction_credits=transaction_credits
+                defaults={
+                    'transaction_credits': transaction_credits,
+                    'customer_id': customer_id
+                }
             )
-            confirmation.save()
 
-        if confirmation.added:
-            return Response({"detail": "Transaction already processed"}, status=status.HTTP_409_CONFLICT)
+            try:
+                customer = RevenueCatCustomer.objects.get(customer_id=customer_id)
+                with transaction.atomic():
+                    customer.user.add_funds(confirmation.transaction_credits)
+                    confirmation.delete()
+                return Response({"message": "Deposit completed successfully"}, status=status.HTTP_200_OK)
 
-        try:
-            deposit = RevenueCatDeposit.objects.get(transaction_id=transaction_id)
-            if deposit.added:
-                confirmation.set_added()
-                return Response({"detail": "Transaction already processed"}, status=status.HTTP_409_CONFLICT)
-
-            deposit.user.add_funds(confirmation.transaction_credits)
-            deposit.set_added()
-            confirmation.set_added()
-            return Response({"message": "Deposit completed successfully"}, status=status.HTTP_200_OK)
-
-        except ObjectDoesNotExist:
-            return Response({"message": "Confirmation created but not completed"}, status=status.HTTP_200_OK)
+            except ObjectDoesNotExist:
+                return Response({"message": "Confirmation created but not completed"}, status=status.HTTP_200_OK)
 
         except Exception as e:
-            print(e)
+            print("Failed to process RevenueCat confirmation: ", e)
             return Response({"detail": "Internal Server Error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

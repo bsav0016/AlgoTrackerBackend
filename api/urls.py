@@ -2,7 +2,7 @@ from django.urls import path
 from api.views import (UserRegistrationView, LoginView, LogoutView, BacktestView, StrategyView, DeviceIDView,
                        AvailableSymbolsAndIntervalsView, PasswordResetRequestView, PasswordResetConfirmView,
                        StripePaymentView,StripePaymentConfirmationView, UserDetailsView, DeleteAccountView,
-                       PromoCodeAvailabilityView, RevenueCatDepositView, RevenueCatConfirmationView)
+                       PromoCodeAvailabilityView, RevenueCatCustomerView, RevenueCatConfirmationView)
 from rest_framework_simplejwt.views import TokenRefreshView
 
 
@@ -25,6 +25,6 @@ urlpatterns = [
     path('symbols-and-intervals/', AvailableSymbolsAndIntervalsView.as_view(), name='symbols-and-intervals'),
     path('payment-intent/', StripePaymentView.as_view(), name='payment-intent'),
     path('payment-confirmation/', StripePaymentConfirmationView.as_view(), name='payment-confirmation'),
-    path('revenuecat-deposit/', RevenueCatDepositView.as_view(), name='revenuecat-deposit'),
+    path('revenuecat-customer/', RevenueCatCustomerView.as_view(), name='revenuecat-customer'),
     path('revenuecat-confirmation/', RevenueCatConfirmationView.as_view(), name='revenuecat-confirmation'),
 ]

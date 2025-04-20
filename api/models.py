@@ -280,21 +280,12 @@ class PaymentIntent(models.Model):
     amount = models.IntegerField(default=0)
 
 
-class RevenueCatDeposit(models.Model):
-    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="revenue_cat_deposit")
-    transaction_id = models.CharField(max_length=50, unique=True)
-    added = models.BooleanField(default=False, null=False, blank=False)
-
-    def set_added(self):
-        self.added = True
-        self.save()
+class RevenueCatCustomer(models.Model):
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="revenue_cat_customer")
+    customer_id = models.CharField(max_length=100, default="", unique=True, null=False, blank=False)
 
 
 class RevenueCatConfirmation(models.Model):
-    transaction_id = models.CharField(max_length=50, unique=True)
+    transaction_id = models.CharField(max_length=32, unique=True)
     transaction_credits = models.IntegerField(default=0, null=False, blank=False)
-    added = models.BooleanField(default=False, null=False, blank=False)
-
-    def set_added(self):
-        self.added = True
-        self.save()
+    customer_id = models.CharField(max_length=50, default="", null=False, blank=False)
