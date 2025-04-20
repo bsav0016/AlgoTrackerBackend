@@ -107,8 +107,8 @@ class RedisManager:
         if strategy_ids:
             prices_json = pd.DataFrame(RedisManager.get_recent_closes(symbol, interval)).to_json()
             for strategy_id in strategy_ids:
-                process_strategy_task(strategy_id, prices_json)
-                #process_strategy_task.delay(strategy_id, prices_json)
+                #process_strategy_task(strategy_id, prices_json)
+                process_strategy_task.delay(strategy_id, prices_json)
 
     @staticmethod
     def get_recent_closes(symbol: str, interval: str, count=500):

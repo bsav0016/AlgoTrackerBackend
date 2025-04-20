@@ -281,7 +281,7 @@ class BacktestService:
             return True, user.account_credits, user.monthly_credits
         elif user.monthly_credits + user.account_credits >= amount:
             user.monthly_credits = 0
-            user.account_credits -= funds_diff
+            user.account_credits += funds_diff
             user.save()
             return True, user.account_credits, user.monthly_credits
         else:
