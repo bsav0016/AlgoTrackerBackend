@@ -520,7 +520,7 @@ class RevenueCatConfirmationView(APIView):
         event = data.get("event")
         product_id = event["product_id"]
         transaction_id = event["transaction_id"]
-
+        print(event)
         if product_id == "FundsDeposit":
             transaction_credits = 500
         elif product_id == "10AlgoTrackerDeposit":

@@ -204,11 +204,18 @@ CACHES = {
     }
 }
 
+RQ_DB = 0
+if parsed_url.path:
+    try:
+        RQ_DB = int(parsed_url.path.lstrip('/'))
+    except:
+        RQ_DB = 0
+
 RQ_QUEUES = {
     'default': {
         'HOST': parsed_url.hostname,
         'PORT': parsed_url.port,
-        'DB': 0,
+        'DB': RQ_DB,
         'PASSWORD': parsed_url.password,
         'USE_SSL': REDIS_URL.startswith("rediss"),
         'SSL_CERT_REQS': None
