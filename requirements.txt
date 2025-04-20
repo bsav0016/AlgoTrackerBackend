@@ -14,7 +14,7 @@ dotenv==0.9.9
 requests==2.32.3
 pandas==2.2.3
 numpy==2.2.3
-celery==5.4.0
+#celery==5.4.0
 django-redis==5.4.0
 asgiref==3.8.1
 matplotlib==3.10.1
