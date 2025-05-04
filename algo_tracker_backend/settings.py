@@ -244,6 +244,7 @@ RQ_QUEUES = {
 
 #Loading variables for Frontend as well
 available_symbol_str = os.getenv("SYMBOLS", "")
+print(available_symbol_str)
 SYMBOLS = {
     key: float(value)
     for key, value in (pair.split(":") for pair in available_symbol_str.split(","))
@@ -258,7 +259,7 @@ INTERVAL_MAP = {
 
 #Firebase (notification service)
 firebase_credentials_json = os.getenv("FIREBASE_CREDENTIALS")
-
+print(firebase_credentials_json)
 if firebase_credentials_json:
     firebase_credentials = json.loads(firebase_credentials_json)
     cred = credentials.Certificate(firebase_credentials)
