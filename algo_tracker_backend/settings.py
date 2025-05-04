@@ -19,12 +19,11 @@ from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 from urllib.parse import urlparse
+from django.core.exceptions import ImproperlyConfigured
 
 
-if "DYNO" in os.environ and "CI" not in os.environ:
-    DEV_ENV = False
-else:
-    DEV_ENV = True
+IS_HEROKU_APP = "DYNO" in os.environ and "CI" not in os.environ
+IS_AWS_APP = os.environ.get("IS_AWS_APP", "False").lower() in ['true', '1', 't', 'y', 'yes']
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -33,14 +32,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: don't run with debug turned on in production!
-if DEV_ENV:
+if IS_HEROKU_APP:
+    DEBUG = False
+    ALLOWED_HOSTS = ["algo-tracker-c96c1f4d7f6e.herokuapp.com"]
+elif IS_AWS_APP:
+    ALLOWED_HOSTS = ["3.87.124.192", "algo-tracker-api.collagecreations.org"]
+    DEBUG = False
+else:
     DEBUG = True
     ALLOWED_HOSTS = ["localhost", "127.0.0.1", "192.168.1.144", "algo-tracker-c96c1f4d7f6e.herokuapp.com"]
     env_path = BASE_DIR / 'algo_tracker_backend' / 'dev_env.env'
     load_dotenv(dotenv_path=env_path)
-else:
-    DEBUG = False
-    ALLOWED_HOSTS = ["algo-tracker-c96c1f4d7f6e.herokuapp.com"]
+
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv('SECRET_KEY', default='')
@@ -105,16 +108,32 @@ WSGI_APPLICATION = 'algo_tracker_backend.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-if DEV_ENV:
+if IS_HEROKU_APP:
+    DATABASES = {
+        'default': dj_database_url.config(conn_max_age=600)
+    }
+elif IS_AWS_APP:
+    AWS_DATABASE = os.getenv('AWS_DATABASE', None)
+    if AWS_DATABASE is None:
+        raise ImproperlyConfigured("AWS_DATABASE variable not set")
+
+    parsed = urlparse(AWS_DATABASE)
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': parsed.path.lstrip('/'),
+            'USER': parsed.username,
+            'PASSWORD': parsed.password,
+            'HOST': parsed.hostname,
+            'PORT': parsed.port or '5432',
+        }
+    }
+else:
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': BASE_DIR / 'db.sqlite3',
         }
-    }
-else:
-    DATABASES = {
-        'default': dj_database_url.config(conn_max_age=600)
     }
 
 
@@ -177,18 +196,17 @@ SIMPLE_JWT = {
 
 
 #Celery
-CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
+CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 
 if CELERY_BROKER_URL.startswith("rediss"):
     CELERY_BROKER_USE_SSL = {'ssl_cert_reqs': ssl.CERT_NONE}
-else:
-    CELERY_BROKER_USE_SSL = None
+    CELERY_REDIS_BACKEND_USE_SSL = {'ssl_cert_reqs': ssl.CERT_NONE}
 
 
 #Redis
-REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
+REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 parsed_url = urlparse(REDIS_URL)
 
 CACHES = {
