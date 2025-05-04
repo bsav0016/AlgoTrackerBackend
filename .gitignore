@@ -2,3 +2,5 @@ venv
 *.sqlite3
 __pycache__/
 *.env
+algotracker-firebase-credentials.json
+algo-tracker-ec2.pem

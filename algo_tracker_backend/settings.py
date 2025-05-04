@@ -11,7 +11,6 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 import os
 import dj_database_url
-import json
 import firebase_admin
 import ssl
 from firebase_admin import credentials
@@ -244,7 +243,7 @@ RQ_QUEUES = {
 
 #Loading variables for Frontend as well
 available_symbol_str = os.getenv("SYMBOLS", "")
-print(available_symbol_str)
+
 SYMBOLS = {
     key: float(value)
     for key, value in (pair.split(":") for pair in available_symbol_str.split(","))
@@ -258,11 +257,10 @@ INTERVAL_MAP = {
 
 
 #Firebase (notification service)
-firebase_credentials_json = os.getenv("FIREBASE_CREDENTIALS")
-print(firebase_credentials_json)
-if firebase_credentials_json:
-    firebase_credentials = json.loads(firebase_credentials_json)
-    cred = credentials.Certificate(firebase_credentials)
+firebase_credentials_path = os.getenv("FIREBASE_CREDENTIALS_PATH")
+firebase_credentials_path = os.path.join(BASE_DIR, firebase_credentials_path)
+if firebase_credentials_path:
+    cred = credentials.Certificate(firebase_credentials_path)
     firebase_admin.initialize_app(cred)
 else:
     raise ValueError("Firebase credentials not found in environment variables.")
