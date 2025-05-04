@@ -37,8 +37,9 @@ if IS_HEROKU_APP:
     ALLOWED_HOSTS = ["algo-tracker-c96c1f4d7f6e.herokuapp.com"]
 elif IS_AWS_APP:
     ALLOWED_HOSTS = ["3.87.124.192", "algo-tracker-api.collagecreations.org"]
-    DEBUG = False
-    load_dotenv()
+    DEBUG = True
+    env_path = BASE_DIR / '.env'
+    load_dotenv(dotenv_path=env_path)
 else:
     DEBUG = True
     ALLOWED_HOSTS = ["localhost", "127.0.0.1", "192.168.1.144", "algo-tracker-c96c1f4d7f6e.herokuapp.com"]
