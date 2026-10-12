@@ -6,7 +6,7 @@ Django REST API for [AlgoTracker](https://github.com/bsav0016/AlgoTrackerFronten
 
 ## Why it exists
 
-<!-- TODO: in your own words, why you built it -->
+Back-testing a strategy and watching live prices around the clock are too heavy and too continuous for a phone app. This API replays strategies over historical prices on demand and keeps a live price feed running, so subscribed strategies can notify users when they signal even when the app is closed.
 
 ## What it does
 
