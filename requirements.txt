@@ -10,7 +10,7 @@ websockets==15.0
 asyncio==3.4.3
 dotenv==0.9.9
 requests==2.32.3
-pandas==2.2.3
+pandas==3.0.6
 numpy==2.2.3
 django-redis==5.4.0
 asgiref==3.8.1
