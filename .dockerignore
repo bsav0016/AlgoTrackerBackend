@@ -1,0 +1,16 @@
+# Keep local state and secrets out of the build context (and therefore out of the image).
+# Secrets reach the containers at runtime: .env via env_file, Firebase credentials via a bind mount.
+.git
+.github
+.idea
+.venv
+venv
+__pycache__
+*.pyc
+.env
+.env.*
+*.pem
+algotracker-firebase-credentials.json
+*.sqlite3
+staticfiles
+.ruff_cache

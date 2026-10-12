@@ -140,7 +140,8 @@ class RedisManager:
 
     @staticmethod
     def get_otp(email: str):
-        return redis_client.get(f"password_reset_otp:{email}")
+        otp = redis_client.get(f"password_reset_otp:{email}")
+        return otp.decode() if isinstance(otp, bytes) else otp  # redis-py returns bytes
 
     @staticmethod
     def delete_otp(email: str):

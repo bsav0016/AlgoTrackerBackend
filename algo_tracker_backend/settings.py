@@ -198,29 +198,34 @@ RQ_QUEUES = {
     }
 }
 
+def parse_pairs(raw):
+    """Splits 'a:b:c,d:e:f' into [['a', 'b', 'c'], ['d', 'e', 'f']]; blank entries are ignored."""
+    return [pair.strip().split(":") for pair in raw.split(",") if pair.strip()]
+
+
 #Loading variables for Frontend as well
 available_symbol_str = os.getenv("SYMBOLS", "")
 
 SYMBOLS = {
     key: float(value)
-    for key, value in (pair.split(":") for pair in available_symbol_str.split(","))
+    for key, value in parse_pairs(available_symbol_str)
 }
 
 intervals_str = os.getenv("INTERVALS", "")
 INTERVAL_MAP = {
     key: {"seconds": int(seconds), "monthly_charge": int(monthly_charge)}
-    for key, seconds, monthly_charge in (pair.split(":") for pair in intervals_str.split(","))
+    for key, seconds, monthly_charge in parse_pairs(intervals_str)
 }
 
 
 #Firebase (notification service)
 firebase_credentials_path = os.getenv("FIREBASE_CREDENTIALS_PATH")
-firebase_credentials_path = os.path.join(BASE_DIR, firebase_credentials_path)
 if firebase_credentials_path:
-    cred = credentials.Certificate(firebase_credentials_path)
+    cred = credentials.Certificate(os.path.join(BASE_DIR, firebase_credentials_path))
     firebase_admin.initialize_app(cred)
-else:
+elif not DEBUG:
     raise ValueError("Firebase credentials not found in environment variables.")
+# With DEBUG on, credentials are optional so a local checkout runs without them.
 
 
 #Gmail
@@ -256,7 +261,7 @@ STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', default='')
 promo_code_str = os.getenv('PROMO_CODES', default='')
 PROMO_CODES = {
     key: value
-    for key, value in (pair.split(":") for pair in promo_code_str.split(","))
+    for key, value in parse_pairs(promo_code_str)
 }
 PROMO_CODE_AVAILABILITY_STR = os.getenv('PROMO_CODE_AVAILABILITY', default='False')
 if PROMO_CODE_AVAILABILITY_STR == 'True' or PROMO_CODE_AVAILABILITY_STR == 'true':

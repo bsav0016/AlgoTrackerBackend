@@ -92,6 +92,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
             self.monthly_credits = F("monthly_credits") + MONTHLY_CREDITS  # Atomic update
             self.reset_monthly_credits = timezone.now() + timedelta(days=30)
             self.save(update_fields=["monthly_credits", "reset_monthly_credits"])
+            self.refresh_from_db(fields=["monthly_credits"])  # replace the F() expression with the stored value
 
     def add_funds(self, amount):
         if amount > 0:
@@ -214,7 +215,6 @@ class Strategy(models.Model):
         else:
             self.position = 2
 
-        self.strategy_return = self.strategy_return * current_close["close"] / indicator_data.iloc[-2]["close"]
         if timezone.now() > self.charge_user_date:
             self.charge_user(INTERVAL_MAP[self.interval]['monthly_charge'])
         self.save()
@@ -233,7 +233,7 @@ class Strategy(models.Model):
             user.monthly_credits = funds_diff
         else:
             user.monthly_credits = 0
-            user.account_credits -= funds_diff
+            user.account_credits += funds_diff
 
         if user.account_credits < 0:
             user.account_credits = 0

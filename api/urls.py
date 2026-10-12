@@ -8,7 +8,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 urlpatterns = [
     path('register/', UserRegistrationView.as_view(), name='user-registration'),
-    path('promo-code-availability', PromoCodeAvailabilityView.as_view(), name='promo-code-availability'),
+    path('promo-code-availability/', PromoCodeAvailabilityView.as_view(), name='promo-code-availability'),
     path('login/', LoginView.as_view(), name='login'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path('delete-account/', DeleteAccountView.as_view(), name='delete-account'),
