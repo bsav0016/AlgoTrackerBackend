@@ -1,26 +1,24 @@
-1. After cloning the repository, from the root directory
-   (recommended to perform this step in a virtual environment):
-`pip install -r requirements.txt`
+## Local development
 
-2. In api/settings.py, for the ALLOWED_HOSTS (in DEV_ENV),
-add your local machine's IP address.
+1. Copy `.env.example` to `.env` and fill in real values (get `TWELVE_DATA_API_KEY`,
+   Stripe test keys, etc. from their respective dashboards).
+2. Place your Firebase service-account JSON at the path referenced by
+   `FIREBASE_CREDENTIALS_PATH` in `.env`.
+3. `docker compose up --build`
 
-3. To setup a local database, run the following commands 
-from the root directory:
-`python manage.py makemigrations api`
-`python manage.py migrate`
+   This runs the full stack: Django (`web`), the RQ worker (`worker-tasks`),
+   the TwelveData websocket listener (`worker-websocket`), Postgres, Redis,
+   and Caddy as a reverse proxy.
+4. On first run, apply migrations and create an admin user:
+   ```
+   docker compose exec web python manage.py migrate
+   docker compose exec web python manage.py createsuperuser
+   ```
+5. In the frontend's `lib/networkRequests/NetworkConstants.tsx`, point the
+   `URL` constant at wherever Caddy is listening (e.g. `http://localhost:8000`
+   if you're bypassing Caddy locally, or the `DOMAIN` you set in `.env`).
 
-4. Start a local redis server on port 6379. Can be checked from command line using:
-`redis-cli`
+## Production deployment
 
-5. To run on your local machine, execute the following command 
-from the root directory:<br>
-`python manage.py runserver [your IP address]:8000`<br>
-ex: `python manage.py runserver 192.168.1.144:8000`
-
-6. Start Celery from terminal:
-`celery -A algo_tracker_backend worker --loglevel=info --pool=solo`
-
-Notes:
-* To kill Celery tasks (can be executed from any directory in command line):
-`taskkill /F /IM celery.exe`
+Runs on a single DigitalOcean Droplet via the same `docker-compose.yml`.
+Deploys are manual for now: SSH in, `git pull`, `docker compose up --build -d`.

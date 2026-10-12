@@ -1,9 +1,9 @@
-from celery import shared_task
+from django_rq import job
 import pandas as pd
 from io import StringIO
 
 
-@shared_task
+@job
 def process_strategy_task(strategy_id, prices_json):
     from api.models import Strategy
     strategy = Strategy.objects.get(id=strategy_id)

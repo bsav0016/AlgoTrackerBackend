@@ -1,0 +1,94 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-algotracker}
+      POSTGRES_USER: ${POSTGRES_USER:-algotracker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-algotracker}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-algotracker}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-algotracker}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./${FIREBASE_CREDENTIALS_PATH}:/app/${FIREBASE_CREDENTIALS_PATH}:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker-tasks:
+    build: .
+    restart: unless-stopped
+    command: python manage.py rqworker default
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-algotracker}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-algotracker}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./${FIREBASE_CREDENTIALS_PATH}:/app/${FIREBASE_CREDENTIALS_PATH}:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker-websocket:
+    build: .
+    restart: unless-stopped
+    command: python websocket_worker.py
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-algotracker}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-algotracker}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./${FIREBASE_CREDENTIALS_PATH}:/app/${FIREBASE_CREDENTIALS_PATH}:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:
