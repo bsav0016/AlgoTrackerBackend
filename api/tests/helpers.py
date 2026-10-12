@@ -1,0 +1,52 @@
+"""Shared fakes for the test suite. Nothing here talks to a real service."""
+import datetime
+
+
+class FakeResponse:
+    """Stand-in for a `requests.Response` returned by the (mocked) TwelveData API."""
+
+    def __init__(self, status_code=200, body=None, text=""):
+        self.status_code = status_code
+        self._body = body
+        self.text = text
+
+    def json(self):
+        return self._body
+
+
+def twelve_data_values(first_date, closes):
+    """Builds a TwelveData `values` payload: one daily bar per close, newest first (as the API sends it)."""
+    first = datetime.date.fromisoformat(first_date)
+    bars = [
+        {
+            "datetime": (first + datetime.timedelta(days=i)).isoformat(),
+            "close": str(close),
+            "low": str(close - 1),
+            "high": str(close + 1),
+        }
+        for i, close in enumerate(closes)
+    ]
+    return bars[::-1]
+
+
+class FakeRedis:
+    """Minimal in-memory Redis for the commands RedisManager uses. Like redis-py (no decode_responses),
+    it hands values back as bytes."""
+
+    def __init__(self):
+        self.values = {}
+        self.ttls = {}
+
+    def setex(self, key, seconds, value):
+        self.values[key] = str(value).encode()
+        self.ttls[key] = seconds
+
+    def get(self, key):
+        return self.values.get(key)
+
+    def delete(self, key):
+        self.values.pop(key, None)
+        self.ttls.pop(key, None)
+
+    def ttl(self, key):
+        return self.ttls.get(key, -2)

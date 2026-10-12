@@ -32,6 +32,18 @@ PROMO_CODES = settings.PROMO_CODES
 PROMO_CODE_AVAILABILITY = settings.PROMO_CODE_AVAILABILITY
 
 
+def unsupported_market_response(symbol, interval):
+    """A 400 response when the symbol or interval isn't one this server is configured for, else None."""
+    if symbol not in SYMBOLS or interval not in INTERVAL_MAP:
+        return Response({"detail": "Unsupported symbol or interval"}, status=status.HTTP_400_BAD_REQUEST)
+    return None
+
+
+def finite_or_zero(value):
+    """JSON can't carry NaN/inf, so undefined statistics are sent as 0 (as NaNs in the result rows are)."""
+    return value if math.isfinite(value) else 0
+
+
 class UserRegistrationView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny, ]
@@ -218,6 +230,10 @@ class BacktestView(APIView):
                 end_date = serializer.validated_data['end_date']
                 signals = serializer.validated_data['signals']
 
+                unsupported = unsupported_market_response(symbol, interval)
+                if unsupported:
+                    return unsupported
+
                 signals = [Signal(**signal) for signal in signals]
 
                 result, attempts = BacktestService.conduct_backtest(symbol, interval, start_date, end_date, signals)
@@ -252,12 +268,12 @@ class BacktestView(APIView):
                 periods_per_year = seconds_per_year_adj / INTERVAL_MAP[interval]["seconds"]
                 sqrt_n = math.sqrt(periods_per_year)
 
-                percent_return = percent_return * annualize_factor
-                percent_return_adj = percent_return_adj * annualize_factor
-                sharpe_ratio = sharpe_ratio * sqrt_n
-                sharpe_ratio_adj = sharpe_ratio_adj * sqrt_n
-                sortino_ratio = sortino_ratio * sqrt_n
-                sortino_ratio_adj = sortino_ratio_adj * sqrt_n
+                percent_return = finite_or_zero(percent_return * annualize_factor)
+                percent_return_adj = finite_or_zero(percent_return_adj * annualize_factor)
+                sharpe_ratio = finite_or_zero(sharpe_ratio * sqrt_n)
+                sharpe_ratio_adj = finite_or_zero(sharpe_ratio_adj * sqrt_n)
+                sortino_ratio = finite_or_zero(sortino_ratio * sqrt_n)
+                sortino_ratio_adj = finite_or_zero(sortino_ratio_adj * sqrt_n)
 
                 user = request.user
                 amount = BACKTEST_BASE_COST * attempts
@@ -300,6 +316,10 @@ class StrategyView(APIView):
                 symbol = serializer.validated_data['symbol']
                 interval = serializer.validated_data['interval']
                 signals = serializer.validated_data['signals']
+
+                unsupported = unsupported_market_response(symbol, interval)
+                if unsupported:
+                    return unsupported
 
                 signals = [Signal(**signal) for signal in signals]
                 strategy = Strategy(
@@ -401,7 +421,7 @@ class StripePaymentView(APIView):
             amount = request.data.get("amount")
             amount = int(amount)
             if amount < 300:
-                raise
+                raise ValueError("Amount below minimum")
             customer = stripe.Customer.create()
             ephemeral_key = stripe.EphemeralKey.create(
                 customer=customer['id'],

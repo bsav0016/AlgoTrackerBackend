@@ -6,7 +6,9 @@ import sys
 
 def main():
     """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'algo_tracker_backend.settings')
+    # `manage.py test` uses isolated settings (fake keys, in-memory DB, no network).
+    default_settings = 'algo_tracker_backend.test_settings' if sys.argv[1:2] == ['test']         else 'algo_tracker_backend.settings'
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', default_settings)
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:

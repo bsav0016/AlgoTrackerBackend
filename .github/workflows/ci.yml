@@ -1,0 +1,69 @@
+name: CI
+
+# Pull-request checks. There is no deployment here: deploys stay manual
+# (git pull && docker compose up --build -d on the server).
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests and checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Dependencies are consistent
+        run: pip check
+      - name: No private-network URLs or secret keys in tracked files
+        run: |
+          if git grep -nIE 'https?://(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)|sk_live_[A-Za-z0-9]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' -- . ':!*.md' ':!.env.example'; then
+            echo "::error::Hard-coded private URL or secret key found; use environment configuration."
+            exit 1
+          fi
+      - name: Static analysis (syntax errors, undefined names)
+        run: ruff check --select E9,F63,F7,F82 .
+      # The steps below use algo_tracker_backend.test_settings: fake keys, in-memory
+      # SQLite, no Redis, and a guard that fails any test opening a non-local socket.
+      # No secrets are needed, and TwelveData, Stripe and Expo are never contacted.
+      - name: Django system check
+        run: python manage.py check --settings=algo_tracker_backend.test_settings
+      - name: Model changes have migrations
+        run: python manage.py makemigrations api --check --dry-run --settings=algo_tracker_backend.test_settings
+      - name: Tests
+        run: python manage.py test
+
+  docker:
+    name: Docker config and image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate docker-compose.yml with placeholder values
+        run: |
+          cp .env.example .env
+          echo "POSTGRES_PASSWORD=ci-placeholder" >> .env
+          docker compose config --quiet
+      - name: Build the application image
+        run: docker build --tag algotracker-api:ci .
+      # Proves the image has every dependency; test settings use no live services or credentials.
+      - name: Run the tests inside the image
+        run: docker run --rm algotracker-api:ci python manage.py test

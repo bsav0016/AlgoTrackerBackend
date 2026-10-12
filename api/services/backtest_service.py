@@ -80,18 +80,19 @@ class BacktestService:
             raise Exception(f"API request failed with status {response.status_code}: {response.text}")
 
     @staticmethod
+    def indicator_column(signal: Signal) -> str:
+        if signal.name == "MACD":
+            return f"{signal.name}_{signal.fast_window}_{signal.slow_window}_{signal.signal_window}"
+        return f"{signal.name}_{signal.window}"
+
+    @staticmethod
     def find_buys(data: pd.DataFrame, signals: List[Signal]) -> pd.DataFrame:
         new_data = data.copy()
         new_data["buy"] = True
         #Add indicator data here
         for signal in signals:
             if signal.buy_signal:
-                if signal.name in ["RSI", "SMA", "EMA", "SO", "BBP", "ADX"]:
-                    indicator_column = f"{signal.name}_{signal.window}"
-                elif signal.name in ["MACD"]:
-                    indicator_column = f"{signal.name}_{signal.fast_window}_{signal.slow_window}_{signal.signal_window}"
-                else:
-                    indicator_column = f"{signal.name}_{signal.window}"
+                indicator_column = BacktestService.indicator_column(signal)
                 condition = new_data[indicator_column] > signal.target_value if signal.above_target else (
                         new_data[indicator_column] < signal.target_value)
                 new_data["buy"] = new_data["buy"] & condition
@@ -103,7 +104,7 @@ class BacktestService:
         new_data["sell"] = True
         for signal in signals:
             if not signal.buy_signal:
-                indicator_column = f"{signal.name}_{signal.window}"
+                indicator_column = BacktestService.indicator_column(signal)
                 condition = new_data[indicator_column] > signal.target_value if signal.above_target else (
                         new_data[indicator_column] < signal.target_value)
                 new_data["sell"] = new_data["sell"] & condition
@@ -214,7 +215,7 @@ class BacktestService:
 
         returns = backtest_results["return"].dropna().pct_change()
         if returns.std() == 0:
-            return float("nan")
+            return float("nan"), float("nan")
         sharpe_ratio = returns.mean() / returns.std()
 
         #Adjusted for asset price
@@ -225,7 +226,7 @@ class BacktestService:
         asset_returns = asset_returns.iloc[:min_length]
         excess_returns = strategy_returns - asset_returns
         if excess_returns.std() == 0:
-            return float("nan")
+            return sharpe_ratio, float("nan")
         sharpe_ratio_adj = excess_returns.mean() / excess_returns.std()
 
         return sharpe_ratio, sharpe_ratio_adj
@@ -240,7 +241,7 @@ class BacktestService:
         strategy_returns = backtest_results["return"].dropna().pct_change()
         downside_returns = strategy_returns[strategy_returns < 0]
         if downside_returns.std() == 0:
-            return float("nan")
+            return float("nan"), float("nan")
         sortino_ratio = strategy_returns.mean() / downside_returns.std()
 
         # Adjusted using asset price as the baseline
@@ -251,7 +252,7 @@ class BacktestService:
         excess_returns = strategy_returns - asset_returns
         downside_returns = excess_returns[excess_returns < 0]
         if downside_returns.std() == 0:
-            return float("nan")
+            return sortino_ratio, float("nan")
         sortino_ratio_adj = excess_returns.mean() / downside_returns.std()
 
         return sortino_ratio, sortino_ratio_adj
