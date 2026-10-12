@@ -5,3 +5,5 @@ __pycache__/
 algotracker-firebase-credentials.json
 algo-tracker-ec2.pem
 *.pem
+.idea/
+.expo/
