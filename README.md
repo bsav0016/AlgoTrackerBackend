@@ -2,8 +2,6 @@
 
 Django REST API for [AlgoTracker](https://github.com/bsav0016/AlgoTrackerFrontend), a mobile app for building indicator-based trading strategies, back-testing them, and subscribing to live signals. The API handles accounts and payments, runs backtests, and watches live prices so it can push a notification when a subscribed strategy signals a trade.
 
-<!-- TODO: add an architecture diagram (app -> API -> RQ worker / websocket worker -> Postgres + Redis) -->
-
 ## Why it exists
 
 Back-testing a strategy and watching live prices around the clock are too heavy and too continuous for a phone app. This API replays strategies over historical prices on demand and keeps a live price feed running, so subscribed strategies can notify users when they signal even when the app is closed.
@@ -121,5 +119,4 @@ Production runs the same compose file on a single DigitalOcean droplet; deploys 
 - `requirements.txt` pins direct dependencies only, so transitive versions can still drift between builds.
 - RevenueCat webhook deliveries are not authenticated or de-duplicated (see the expected-failure test in `api/tests/test_api_payments.py`).
 - Prices come from a third-party feed (TwelveData); symbols are limited to the configured `SYMBOLS` list.
-- Backtests are simulations on historical data and do not model fees or slippage. <!-- TODO: confirm; I did not see fee or slippage handling in backtest_service.py -->
-- <!-- TODO: is the production deployment still running? Last upstream commit before this work was May 2025. -->
+- Backtests are simulations on historical data and do not model fees or slippage.
