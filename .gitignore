@@ -4,3 +4,4 @@ __pycache__/
 *.env
 algotracker-firebase-credentials.json
 algo-tracker-ec2.pem
+*.pem
