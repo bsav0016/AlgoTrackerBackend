@@ -2,6 +2,15 @@
 
 Django REST API for [AlgoTracker](https://github.com/bsav0016/AlgoTrackerFrontend), a mobile app for building indicator-based trading strategies, back-testing them, and subscribing to live signals. The API handles accounts and payments, runs backtests, and watches live prices so it can push a notification when a subscribed strategy signals a trade.
 
+## Project status
+
+**This is a portfolio project and it is not currently deployed.** The production server is paused, so there is no hosted demo and no live API to call. The code is published to show how the system is designed and tested.
+
+- **What works without any accounts or keys:** the whole automated test suite (`python manage.py test`) and CI run with fake settings, an in-memory database and no network access. Nothing in the tests contacts TwelveData, Stripe, RevenueCat, Firebase or an email server.
+- **What needs your own accounts to run for real:** live prices (TwelveData), card payments (Stripe), store purchases (RevenueCat), push notifications (Firebase and Expo) and outgoing email (SMTP). You supply your own keys; none are in this repository.
+- **No credentials are stored here.** Every secret and environment-specific value is read from environment variables. `.env.example` lists them with empty or placeholder values. The TwelveData API key used during development was regenerated on 2026-10-13, so a key from any earlier version of this repository no longer works.
+- **The mobile app** that talks to this API is in [AlgoTrackerFrontend](https://github.com/bsav0016/AlgoTrackerFrontend).
+
 ## Why it exists
 
 Back-testing a strategy and watching live prices around the clock are too heavy and too continuous for a phone app. This API replays strategies over historical prices on demand and keeps a live price feed running, so subscribed strategies can notify users when they signal even when the app is closed.
@@ -104,6 +113,21 @@ Static checks use Ruff (`pip install -r requirements-dev.txt`, then `ruff check 
 
 Production runs the same compose file on a single DigitalOcean droplet; deploys are manual (`git pull`, `docker compose up --build -d`).
 
+## Payments
+
+Backtests and subscriptions cost credits, and credits can be bought two ways. Both end in the same balance (`add_funds` on the user).
+
+| Path | How it works | How the server trusts it |
+| --- | --- | --- |
+| **Stripe** | The app asks the API for a payment (`Customer`, ephemeral key and `PaymentIntent`), pays in Stripe's payment sheet, and Stripe calls the API's webhook when the payment succeeds. | The webhook signature is verified with `STRIPE_WEBHOOK_SECRET`. A bad signature is rejected and nothing is credited. |
+| **RevenueCat** (store purchases) | RevenueCat calls the API's confirmation webhook after a store purchase, and the app registers its RevenueCat customer id. | The webhook must carry a shared secret in its `Authorization` header (`REVENUECAT_WEBHOOK_AUTH`). With no secret configured, every request is rejected. |
+
+Stripe notes for anyone running this themselves:
+
+- Use a **Stripe key that belongs to this app only**, not one shared with other projects. A restricted key is enough: the code creates customers, ephemeral keys and payment intents, so give it only the permissions for those (customers and payment intents write) and check the exact list in Stripe's test mode.
+- Give the webhook endpoint **its own signing secret** (`STRIPE_WEBHOOK_SECRET`) so it can be rotated independently.
+- Start in test mode. The tests use fake keys and mock Stripe, so they never call it.
+
 ## Before going live again
 
 The production server is currently paused. When it is brought back up:
@@ -111,7 +135,8 @@ The production server is currently paused. When it is brought back up:
 - [ ] Set `REVENUECAT_WEBHOOK_AUTH` in the server's `.env` (a long random value). Until it is set, the RevenueCat webhook rejects every request, so purchases will not credit.
 - [ ] In RevenueCat, open Integrations > Webhooks and set the webhook URL to the server's `/api/revenuecat-confirmation/` and the **Authorization header value** to the same string. The webhook was last configured with an old Heroku address that no longer responds.
 - [ ] Make a sandbox purchase and confirm the credits arrive.
-- [ ] Use a **new** Django `SECRET_KEY` and a **new** SSH key pair for the next deployment (never reuse earlier ones), and set the other variables from `.env.example`.
+- [ ] Build a **fresh server** rather than resuming an old one. Use a **new** Django `SECRET_KEY`, and a **new** SSH key pair (never reuse earlier ones), and set the other variables from `.env.example`. The TwelveData API key was already regenerated on 2026-10-13; put the current one in the server's environment.
+- [ ] Create a Stripe key for this app only, and a webhook endpoint with its own signing secret (see Payments).
 - [ ] Check that the app's production API address points at the live server.
 
 ## Design decisions
