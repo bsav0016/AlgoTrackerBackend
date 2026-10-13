@@ -7,7 +7,6 @@ psycopg2-binary==2.9.10
 whitenoise==6.9.0
 dj-database-url==2.3.0
 websockets==15.0
-asyncio==3.4.3
 dotenv==0.9.9
 requests==2.32.3
 pandas==2.2.3
