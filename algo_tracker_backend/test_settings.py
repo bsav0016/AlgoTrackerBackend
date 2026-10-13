@@ -16,6 +16,7 @@ os.environ.update({
     "TWELVE_DATA_API_KEY": "test-twelve-data-key",
     "STRIPE_SECRET_KEY": "sk_test_not_real",
     "STRIPE_WEBHOOK_SECRET": "whsec_test_not_real",
+    "REVENUECAT_WEBHOOK_AUTH": "test-revenuecat-webhook-secret",
     "SYMBOLS": "AAPL:1,BTC/USD:24",
     "INTERVALS": "1min:60:100,1day:86400:10",
     "PROMO_CODES": "WELCOME:50",

@@ -1,3 +1,4 @@
+import hmac
 import math
 from rest_framework import status
 from rest_framework.response import Response
@@ -524,13 +525,43 @@ class RevenueCatCustomerView(APIView):
             return Response({"detail": "Internal Server Error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# TODO(go-live): the production server is currently paused, so no webhook reaches this view. Before it
+# goes live again, RevenueCat must be pointed at it with a matching secret:
+#   1. Set REVENUECAT_WEBHOOK_AUTH in the server's .env to a long random value.
+#   2. In RevenueCat (Integrations > Webhooks), set the webhook URL to this server's
+#      /api/revenuecat-confirmation/ and the Authorization header value to the same string.
+#      The webhook was last configured with an old Heroku URL that no longer responds.
+#   3. Send a test event / make a sandbox purchase and confirm the credits arrive.
+# Until the secret is set, every request is rejected on purpose.
+def revenuecat_request_is_authorized(request):
+    """True only if the Authorization header equals the configured webhook secret.
+
+    Fails closed: with no secret configured nothing is authorized. The comparison is constant-time.
+    """
+    expected = settings.REVENUECAT_WEBHOOK_AUTH
+    if not expected:
+        return False
+    supplied = request.headers.get("Authorization", "")
+    return hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
+
+
 class RevenueCatConfirmationView(APIView):
+    # Called by RevenueCat's servers, not by a signed-in user, so JWT authentication does not apply;
+    # the shared secret in the Authorization header is checked instead.
+    authentication_classes = []
+    permission_classes = [AllowAny, ]
+
     def post(self, request):
+        if not revenuecat_request_is_authorized(request):
+            return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
+
         data = request.data
-        event = data.get("event")
-        product_id = event["product_id"]
-        transaction_id = event["transaction_id"]
-        customer_id = event["app_user_id"]
+        event = data.get("event") if isinstance(data, dict) else None
+        if not isinstance(event, dict):
+            return Response({"detail": "Missing required fields"}, status=status.HTTP_400_BAD_REQUEST)
+        product_id = event.get("product_id")
+        transaction_id = event.get("transaction_id")
+        customer_id = event.get("app_user_id")
 
         if not all([product_id, transaction_id, customer_id]):
             return Response({"detail": "Missing required fields"}, status=status.HTTP_400_BAD_REQUEST)
