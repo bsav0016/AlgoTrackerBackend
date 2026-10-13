@@ -104,6 +104,16 @@ Static checks use Ruff (`pip install -r requirements-dev.txt`, then `ruff check 
 
 Production runs the same compose file on a single DigitalOcean droplet; deploys are manual (`git pull`, `docker compose up --build -d`).
 
+## Before going live again
+
+The production server is currently paused. When it is brought back up:
+
+- [ ] Set `REVENUECAT_WEBHOOK_AUTH` in the server's `.env` (a long random value). Until it is set, the RevenueCat webhook rejects every request, so purchases will not credit.
+- [ ] In RevenueCat, open Integrations > Webhooks and set the webhook URL to the server's `/api/revenuecat-confirmation/` and the **Authorization header value** to the same string. The webhook was last configured with an old Heroku address that no longer responds.
+- [ ] Make a sandbox purchase and confirm the credits arrive.
+- [ ] Use a **new** Django `SECRET_KEY` and a **new** SSH key pair for the next deployment (never reuse earlier ones), and set the other variables from `.env.example`.
+- [ ] Check that the app's production API address points at the live server.
+
 ## Design decisions
 
 - **Environment-driven settings.** One settings file reads `DEBUG`, `ALLOWED_HOSTS`, `DATABASE_URL` and the rest from the environment, instead of per-host branches. This replaced earlier Heroku and AWS branches.
@@ -111,12 +121,13 @@ Production runs the same compose file on a single DigitalOcean droplet; deploys 
 - **Separate websocket worker.** The price feed is a long-lived connection, so it runs outside the request/response API and reconnects on its own after errors.
 - **Pricing is configuration.** Backtest cost, iterations, monthly credits, symbols and intervals come from environment variables and are served to the app.
 - **Two payment paths** (Stripe and RevenueCat) both end in the same credit balance.
+- **Webhooks are authenticated.** Stripe events are verified with the Stripe signature. The RevenueCat webhook has no signature, so it requires a shared secret in the `Authorization` header (`REVENUECAT_WEBHOOK_AUTH`), compared in constant time. With no secret configured it rejects every request, so a missing setting can never allow free credits.
 
 ## Limitations
 
 - Tests cover the core logic and API but not the websocket worker, the Redis price loader, or the Expo push client.
 - Deploys are manual; CI only runs checks and tests.
 - `requirements.txt` pins direct dependencies only, so transitive versions can still drift between builds.
-- RevenueCat webhook deliveries are not authenticated or de-duplicated (see the expected-failure test in `api/tests/test_api_payments.py`).
+- RevenueCat webhook deliveries are not de-duplicated: a processed transaction is deleted, so a retried delivery could credit twice (see the expected-failure test in `api/tests/test_api_payments.py`).
 - Prices come from a third-party feed (TwelveData); symbols are limited to the configured `SYMBOLS` list.
 - Backtests are simulations on historical data and do not model fees or slippage.

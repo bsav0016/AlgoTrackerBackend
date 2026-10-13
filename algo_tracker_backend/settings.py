@@ -35,6 +35,8 @@ ALLOWED_HOSTS = [
 
 
 # SECURITY WARNING: keep the secret key used in production secret!
+# TODO(go-live): generate a NEW SECRET_KEY for the next deployment. Never reuse a key from an earlier
+# deployment or from any file that was ever committed.
 SECRET_KEY = os.getenv('SECRET_KEY', default='')
 
 TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "Not found")
@@ -255,6 +257,10 @@ except:
 #Payment information
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', default='')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', default='')
+# Shared secret RevenueCat sends in the Authorization header of its webhook. If it is empty, the
+# webhook rejects every request (it never accepts unauthenticated purchases).
+# TODO(go-live): set this, and update the RevenueCat webhook, before the server is live again (see api/views.py).
+REVENUECAT_WEBHOOK_AUTH = os.getenv('REVENUECAT_WEBHOOK_AUTH', default='')
 
 
 #Promo codes

@@ -132,17 +132,22 @@ def revenuecat_event(transaction_id="tx1", product_id="10AlgoTrackerDeposit", cu
     return {"event": {"product_id": product_id, "transaction_id": transaction_id, "app_user_id": customer}}
 
 
+WEBHOOK_AUTH = "test-revenuecat-webhook-secret"  # matches REVENUECAT_WEBHOOK_AUTH in test_settings
+
+
 class RevenueCatTests(APITestCase):
     confirm_url = "/api/revenuecat-confirmation/"
     customer_url = "/api/revenuecat-customer/"
 
     def setUp(self):
         self.user = make_user()
+        self.client.credentials(HTTP_AUTHORIZATION=WEBHOOK_AUTH)  # what RevenueCat sends
 
     def register_customer(self, customer_id="rc_customer"):
         self.client.force_authenticate(self.user)
         response = self.client.post(self.customer_url, {"customer_id": customer_id}, format="json")
-        self.client.force_authenticate(None)
+        self.client.force_authenticate(None)  # also clears credentials, so set the webhook header again
+        self.client.credentials(HTTP_AUTHORIZATION=WEBHOOK_AUTH)
         return response
 
     def test_purchase_after_the_customer_is_registered_credits_immediately(self):
@@ -197,3 +202,60 @@ class RevenueCatTests(APITestCase):
         for _ in range(2):
             self.client.post(self.confirm_url, revenuecat_event(), format="json")
         self.assertEqual(credits_of(self.user), 1000)
+
+
+class RevenueCatWebhookAuthTests(APITestCase):
+    """Anyone who can reach the server can POST to the webhook URL, so the shared secret is the
+    only thing standing between a forged "purchase" and free credits."""
+    confirm_url = "/api/revenuecat-confirmation/"
+    customer_url = "/api/revenuecat-customer/"
+
+    def setUp(self):
+        self.user = make_user()
+        self.client.force_authenticate(self.user)
+        self.client.post(self.customer_url, {"customer_id": "rc_customer"}, format="json")
+        self.client.force_authenticate(None)
+
+    def forge(self, **extra):
+        return self.client.post(self.confirm_url, revenuecat_event(product_id="100AlgoTrackerDeposit"),
+                                format="json", **extra)
+
+    def assert_nothing_happened(self, response):
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(credits_of(self.user), 0)
+        self.assertFalse(RevenueCatConfirmation.objects.exists())
+
+    def test_request_without_the_secret_is_rejected(self):
+        self.assert_nothing_happened(self.forge())
+
+    def test_wrong_secret_is_rejected(self):
+        for value in ["wrong", WEBHOOK_AUTH + "x", WEBHOOK_AUTH[:-1], WEBHOOK_AUTH.upper(), " " + WEBHOOK_AUTH, ""]:
+            with self.subTest(value=value):
+                self.assert_nothing_happened(self.forge(HTTP_AUTHORIZATION=value))
+
+    def test_bearer_prefix_is_not_accepted_unless_it_is_part_of_the_configured_value(self):
+        self.assert_nothing_happened(self.forge(HTTP_AUTHORIZATION="Bearer " + WEBHOOK_AUTH))
+
+    def test_a_logged_in_users_jwt_does_not_authorize_the_webhook(self):
+        from rest_framework_simplejwt.tokens import RefreshToken
+        token = str(RefreshToken.for_user(self.user).access_token)
+        self.assert_nothing_happened(self.forge(HTTP_AUTHORIZATION=f"Bearer {token}"))
+
+    def test_correct_secret_credits_the_account(self):
+        response = self.forge(HTTP_AUTHORIZATION=WEBHOOK_AUTH)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(credits_of(self.user), 10000)
+
+    def test_fails_closed_when_no_secret_is_configured(self):
+        with self.settings(REVENUECAT_WEBHOOK_AUTH=""):
+            for header in [{}, {"HTTP_AUTHORIZATION": ""}]:
+                with self.subTest(header=header):
+                    self.assert_nothing_happened(self.forge(**header))
+
+    def test_malformed_events_from_a_trusted_sender_are_400_not_500(self):
+        self.client.credentials(HTTP_AUTHORIZATION=WEBHOOK_AUTH)
+        for payload in [{}, {"event": None}, {"event": "x"}, {"event": {}}, {"event": {"product_id": "FundsDeposit"}}]:
+            with self.subTest(payload=payload):
+                response = self.client.post(self.confirm_url, payload, format="json")
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(credits_of(self.user), 0)
