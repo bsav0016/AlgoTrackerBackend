@@ -142,6 +142,7 @@ The production server is currently paused. When it is brought back up:
 ## Design decisions
 
 - **Environment-driven settings.** One settings file reads `DEBUG`, `ALLOWED_HOSTS`, `DATABASE_URL` and the rest from the environment, instead of per-host branches. This replaced earlier Heroku and AWS branches.
+- **CORS is closed by default.** The only client is the native Expo app, which does not use CORS, so production allows no cross-origin browser requests. List origins in `CORS_ALLOWED_ORIGINS` if a web client is ever added; `DEBUG=True` allows every origin for local experiments.
 - **RQ instead of Celery** for background jobs, to keep the moving parts down (it only needs Redis, which is already used for caching).
 - **Separate websocket worker.** The price feed is a long-lived connection, so it runs outside the request/response API and reconnects on its own after errors.
 - **Pricing is configuration.** Backtest cost, iterations, monthly credits, symbols and intervals come from environment variables and are served to the app.

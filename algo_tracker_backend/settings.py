@@ -73,7 +73,16 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-CORS_ORIGIN_ALLOW_ALL = True
+def cors_settings(debug, raw_origins):
+    """Returns (allow_all, allowed_origins) from DEBUG and the comma-separated CORS_ALLOWED_ORIGINS value."""
+    origins = [origin.strip() for origin in raw_origins.split(',') if origin.strip()]
+    return debug, origins
+
+
+# CORS only applies to browsers; the Expo app is native and ignores it, and there is no web client. So production
+# answers no cross-origin browser requests unless CORS_ALLOWED_ORIGINS lists them (comma-separated, with scheme,
+# e.g. https://app.example.com). Every origin is allowed only while DEBUG is on, for local web experiments.
+CORS_ORIGIN_ALLOW_ALL, CORS_ALLOWED_ORIGINS = cors_settings(DEBUG, os.getenv('CORS_ALLOWED_ORIGINS', ''))
 
 ROOT_URLCONF = 'algo_tracker_backend.urls'
 
