@@ -157,3 +157,7 @@ The production server is currently paused. When it is brought back up:
 - RevenueCat webhook deliveries are not de-duplicated: a processed transaction is deleted, so a retried delivery could credit twice (see the expected-failure test in `api/tests/test_api_payments.py`).
 - Prices come from a third-party feed (TwelveData); symbols are limited to the configured `SYMBOLS` list.
 - Backtests are simulations on historical data and do not model fees or slippage.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
