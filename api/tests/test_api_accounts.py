@@ -9,6 +9,7 @@ from rest_framework.test import APITestCase
 
 from api.models import CustomUser, Strategy
 from api.tests.helpers import FakeRedis
+from api.views import MAX_OTP_ATTEMPTS
 
 REGISTER = {
     "username": "alice", "email": "alice@example.com", "password": "S3cure-pass!",
@@ -273,3 +274,57 @@ class PasswordResetSecretsTests(APITestCase):
             self.client.post("/api/password-reset/", {"email": "alice@example.com"}, format="json")
             code = mail.outbox[-1].body.split("code is: ")[1].split("\n")[0]
             self.assertRegex(code, r"^[1-9][0-9]{5}$")
+
+
+class PasswordResetAttemptLimitTests(APITestCase):
+    """A six-digit code must not be guessable by trying them all, so wrong guesses are capped per code."""
+
+    def setUp(self):
+        self.user = make_user()
+        self.redis = FakeRedis()
+        patcher = mock.patch("api.redis_manager.redis_client", self.redis)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def request_code(self):
+        self.client.post("/api/password-reset/", {"email": "alice@example.com"}, format="json")
+        return mail.outbox[-1].body.split("code is: ")[1].split("\n")[0]
+
+    def confirm(self, otp):
+        return self.client.post("/api/password-reset-confirm/",
+                                {"username": "alice", "otp": otp, "password": "N3w-password!"}, format="json")
+
+    def wrong_code(self, code):
+        return "000000" if code != "000000" else "111111"
+
+    def test_the_code_is_thrown_away_after_too_many_wrong_guesses(self):
+        code = self.request_code()
+        wrong = self.wrong_code(code)
+        for _ in range(MAX_OTP_ATTEMPTS - 1):
+            self.assertEqual(self.confirm(wrong).status_code, status.HTTP_417_EXPECTATION_FAILED)
+        self.assertEqual(self.confirm(wrong).status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # Even the right code no longer works, and the password is unchanged.
+        self.assertEqual(self.confirm(code).status_code, status.HTTP_417_EXPECTATION_FAILED)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("S3cure-pass!"))
+
+    def test_the_right_code_still_works_after_a_few_wrong_guesses(self):
+        code = self.request_code()
+        for _ in range(MAX_OTP_ATTEMPTS - 1):
+            self.confirm(self.wrong_code(code))
+        self.assertEqual(self.confirm(code).status_code, status.HTTP_200_OK)
+
+    def test_a_new_code_after_a_lockout_works_and_starts_a_fresh_count(self):
+        code = self.request_code()
+        for _ in range(MAX_OTP_ATTEMPTS):
+            self.confirm(self.wrong_code(code))
+        fresh = self.request_code()
+        for _ in range(MAX_OTP_ATTEMPTS - 1):
+            self.confirm(self.wrong_code(fresh))
+        self.assertEqual(self.confirm(fresh).status_code, status.HTTP_200_OK)
+
+    def test_guesses_without_a_live_code_are_not_counted(self):
+        for _ in range(MAX_OTP_ATTEMPTS + 2):
+            self.assertEqual(self.confirm("123456").status_code, status.HTTP_417_EXPECTATION_FAILED)
+        self.assertEqual(self.redis.values, {})

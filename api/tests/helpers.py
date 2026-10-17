@@ -44,6 +44,14 @@ class FakeRedis:
     def get(self, key):
         return self.values.get(key)
 
+    def incr(self, key):
+        count = int(self.values.get(key, b"0")) + 1
+        self.values[key] = str(count).encode()
+        return count
+
+    def expire(self, key, seconds):
+        self.ttls[key] = seconds
+
     def delete(self, key):
         self.values.pop(key, None)
         self.ttls.pop(key, None)

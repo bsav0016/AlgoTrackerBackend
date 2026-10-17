@@ -23,6 +23,8 @@ import stripe
 from stripe import StripeError
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
+
+MAX_OTP_ATTEMPTS = 5  # wrong guesses allowed per password-reset code
 INTERVAL_MAP = settings.INTERVAL_MAP
 BACKTEST_BASE_COST = settings.BACKTEST_BASE_COST
 SYMBOLS = settings.SYMBOLS
@@ -399,6 +401,12 @@ class PasswordResetConfirmView(APIView):
             stored_otp = RedisManager.get_otp(user.email)
 
             if not stored_otp or str(stored_otp) != str(otp):
+                # Only a live code can be guessed at; after too many wrong guesses it is thrown away, so the
+                # six digits cannot be brute-forced inside the ten minutes the code lives for.
+                if stored_otp and RedisManager.record_failed_otp_attempt(user.email) >= MAX_OTP_ATTEMPTS:
+                    RedisManager.delete_otp(user.email)
+                    return Response({"error": "Too many incorrect codes. Request a new code."},
+                                    status=status.HTTP_429_TOO_MANY_REQUESTS)
                 return Response({"error": "Invalid or expired OTP"}, status=status.HTTP_417_EXPECTATION_FAILED)
 
             user.set_password(new_password)
