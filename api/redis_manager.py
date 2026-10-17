@@ -137,6 +137,7 @@ class RedisManager:
     @staticmethod
     def store_otp(email: str, otp: int):
         redis_client.setex(f"password_reset_otp:{email}", 600, otp)
+        redis_client.delete(f"password_reset_attempts:{email}")  # a new code starts with a clean count
 
     @staticmethod
     def get_otp(email: str):
@@ -146,3 +147,13 @@ class RedisManager:
     @staticmethod
     def delete_otp(email: str):
         redis_client.delete(f"password_reset_otp:{email}")
+        redis_client.delete(f"password_reset_attempts:{email}")
+
+    @staticmethod
+    def record_failed_otp_attempt(email: str) -> int:
+        """Count one wrong guess at the current reset code and return the running total."""
+        key = f"password_reset_attempts:{email}"
+        attempts = redis_client.incr(key)
+        if attempts == 1:
+            redis_client.expire(key, 600)  # same lifetime as the code itself
+        return attempts
