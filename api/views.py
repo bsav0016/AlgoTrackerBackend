@@ -15,7 +15,7 @@ from api.services.auth_service import AuthService
 from api.services.backtest_service import BacktestService
 from api.indicators.signal import Signal
 from rest_framework_simplejwt.authentication import JWTAuthentication
-import random
+import secrets
 import numpy as np
 from django.core.mail import send_mail
 from api.redis_manager import RedisManager
@@ -362,13 +362,12 @@ class PasswordResetRequestView(APIView):
 
     def post(self, request):
         email = request.data.get("email")
-        print(email)
         try:
             CustomUser.objects.get(email=email)
         except ObjectDoesNotExist:
             return Response({"detail": "User with email not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        otp = random.randint(100000, 999999)
+        otp = secrets.randbelow(900000) + 100000  # six digits
 
         RedisManager.delete_otp(email)
         RedisManager.store_otp(email, otp)
@@ -398,8 +397,6 @@ class PasswordResetConfirmView(APIView):
         try:
             user = CustomUser.objects.get(username=username)
             stored_otp = RedisManager.get_otp(user.email)
-            print(stored_otp)
-            print(otp)
 
             if not stored_otp or str(stored_otp) != str(otp):
                 return Response({"error": "Invalid or expired OTP"}, status=status.HTTP_417_EXPECTATION_FAILED)

@@ -88,7 +88,7 @@ python manage.py test
 
 `manage.py test` automatically uses `algo_tracker_backend.test_settings`: fake API keys, in-memory SQLite, an unreachable Redis, and a guard that fails any test that tries to open a non-local network connection. It ignores your `.env`, needs no services or secrets, and never contacts TwelveData, Stripe or Expo; those are mocked. Run one module with `python manage.py test api.tests.test_backtest_service`.
 
-The suite covers the indicators, backtest math, live signal handling and billing, and the account, backtest, strategy and payment APIs.
+The suite covers the indicators, backtest math, live signal handling and billing, and the account (including the password-reset flow and that reset codes are never logged), backtest, strategy and payment APIs.
 
 Static checks use Ruff (`pip install -r requirements-dev.txt`, then `ruff check --select E9,F63,F7,F82 .`, which flags syntax errors and undefined names).
 
@@ -146,6 +146,7 @@ The production server is currently paused. When it is brought back up:
 - **RQ instead of Celery** for background jobs, to keep the moving parts down (it only needs Redis, which is already used for caching).
 - **Separate websocket worker.** The price feed is a long-lived connection, so it runs outside the request/response API and reconnects on its own after errors.
 - **Pricing is configuration.** Backtest cost, iterations, monthly credits, symbols and intervals come from environment variables and are served to the app.
+- **Password-reset codes are secrets.** A code is six digits from Python's `secrets` module, kept in Redis for 10 minutes, single use, and never printed or logged (a test checks this).
 - **Two payment paths** (Stripe and RevenueCat) both end in the same credit balance.
 - **Webhooks are authenticated.** Stripe events are verified with the Stripe signature. The RevenueCat webhook has no signature, so it requires a shared secret in the `Authorization` header (`REVENUECAT_WEBHOOK_AUTH`), compared in constant time. With no secret configured it rejects every request, so a missing setting can never allow free credits.
 
