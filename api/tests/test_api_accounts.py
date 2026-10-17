@@ -1,4 +1,6 @@
 """Account, auth and password-reset workflows through the real URL routing, serializers and database."""
+import contextlib
+import io
 from unittest import mock
 
 from django.core import mail
@@ -242,3 +244,32 @@ class PromoCodeAvailabilityTests(APITestCase):
         response = self.client.get("/api/promo-code-availability/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, {"availability": True})
+
+
+class PasswordResetSecretsTests(APITestCase):
+    """The reset code is a credential: it must not leak into logs, and must be a plain six-digit number."""
+
+    def setUp(self):
+        self.user = make_user()
+        patcher = mock.patch("api.redis_manager.redis_client", FakeRedis())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_code_and_email_never_reach_stdout_or_stderr(self):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.client.post("/api/password-reset/", {"email": "alice@example.com"}, format="json")
+            code = mail.outbox[-1].body.split("code is: ")[1].split("\n")[0]
+            wrong = "000000" if code != "000000" else "111111"
+            for attempt in (wrong, code):
+                self.client.post("/api/password-reset-confirm/",
+                                 {"username": "alice", "otp": attempt, "password": "N3w-password!"}, format="json")
+        logged = out.getvalue() + err.getvalue()
+        self.assertNotIn(code, logged)
+        self.assertNotIn("alice@example.com", logged)
+
+    def test_code_is_six_digits(self):
+        for _ in range(25):
+            self.client.post("/api/password-reset/", {"email": "alice@example.com"}, format="json")
+            code = mail.outbox[-1].body.split("code is: ")[1].split("\n")[0]
+            self.assertRegex(code, r"^[1-9][0-9]{5}$")
