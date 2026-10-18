@@ -98,6 +98,11 @@ class SeedHistoryTests(FakeRedisCase):
         self.assertEqual([c["close"] for c in closes], [10.0, 11.0, 12.0])
         self.assertEqual([(c["high"], c["low"]) for c in closes], [(11.0, 9.0), (12.0, 10.0), (13.0, 11.0)])
 
+    def test_history_is_requested_up_to_now_not_just_up_to_midnight(self):
+        # With a date alone TwelveData stops intraday history at 00:00, leaving a gap up to the first live candle.
+        self.seed()
+        self.assertRegex(self.get.call_args.kwargs["params"]["end_date"], r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$")
+
     def test_loading_history_does_not_run_strategies(self):
         make_strategy(make_user(), position=1)
         self.seed()
@@ -141,3 +146,48 @@ class SeedCandlesCommandTests(SimpleTestCase):
 
     def test_force_flag_is_passed_on(self):
         self.run_command("--force").assert_awaited_once_with(force=True)
+
+
+class RedisSettingsTests(SimpleTestCase):
+    def test_a_plain_redis_url_gets_no_tls_options(self):
+        # redis-py raises TypeError on ssl_cert_reqs for a non-TLS connection, which broke every Redis call.
+        from algo_tracker_backend.settings import redis_pool_kwargs
+        self.assertEqual(redis_pool_kwargs("redis://redis:6379/0"), {})
+
+    def test_a_tls_redis_url_keeps_its_option(self):
+        from algo_tracker_backend.settings import redis_pool_kwargs
+        self.assertEqual(redis_pool_kwargs("rediss://example.com:6380/0"), {"ssl_cert_reqs": None})
+
+    def test_the_configured_cache_connection_can_be_built(self):
+        from django_redis import get_redis_connection
+        get_redis_connection("default").connection_pool.make_connection()  # builds, does not connect
+
+
+class LoggingTests(SimpleTestCase):
+    def test_request_loggers_that_print_the_api_key_stay_quiet_at_debug(self):
+        import logging
+        for name in ("urllib3", "websockets", "requests"):
+            self.assertGreaterEqual(logging.getLogger(name).getEffectiveLevel(), logging.WARNING, name)
+
+
+class TickTimeTests(FakeRedisCase):
+    def message(self, **fields):
+        return json.dumps({"event": "price", "symbol": "AAPL", "price": "10.5", **fields})
+
+    def record(self, message):
+        with mock.patch.object(RedisManager, "record_tick", new=mock.AsyncMock()) as record_tick:
+            async_to_sync(websocket_client.on_message)(message)
+        return record_tick
+
+    def test_a_tick_is_placed_by_the_exchange_time_in_the_message(self):
+        record_tick = self.record(self.message(timestamp=1700000123))
+        self.assertTrue(record_tick.await_count >= 1)
+        self.assertTrue(all(call.args[3] == 1700000123 for call in record_tick.await_args_list))
+
+    def test_a_missing_or_bad_time_falls_back_to_the_clock(self):
+        for fields in ({}, {"timestamp": None}, {"timestamp": "soon"}):
+            with self.subTest(fields=fields):
+                before = int(time.time())
+                record_tick = self.record(self.message(**fields))
+                used = record_tick.await_args_list[0].args[3]
+                self.assertTrue(before <= used <= before + 3)

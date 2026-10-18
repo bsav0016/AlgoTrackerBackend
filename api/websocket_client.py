@@ -40,11 +40,17 @@ async def on_message(message):
                 logger.error("Subscription failed: %s", data)
 
         elif "symbol" in data and "price" in data:
-            current_timestamp = int(datetime.now(timezone.utc).timestamp())
-            RedisManager.mark_tick(current_timestamp)
+            now = int(datetime.now(timezone.utc).timestamp())
+            RedisManager.mark_tick(now)
+            # Each price message carries the exchange's own time. Use it, so a delayed message (after a
+            # reconnect, say) still lands in the candle it belongs to; fall back to the clock if it is missing.
+            try:
+                tick_time = int(data["timestamp"])
+            except (KeyError, TypeError, ValueError):
+                tick_time = now
             for interval_key, interval_values in INTERVAL_MAP.items():
                 await RedisManager.record_tick(
-                    data["symbol"], interval_key, float(data["price"]), current_timestamp, interval_values['seconds'])
+                    data["symbol"], interval_key, float(data["price"]), tick_time, interval_values['seconds'])
 
     except json.JSONDecodeError as e:
         logger.error("JSON decoding error: %s", e)
