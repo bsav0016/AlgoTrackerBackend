@@ -77,7 +77,7 @@ class LiveBacktestParityTests(LivePipelineCase):
             async_to_sync(RedisManager.store_close_price)(
                 SYMBOL, INTERVAL, row["close"], int(row["timestamp"]), high=row["high"], low=row["low"])
             while self.queued:
-                process_strategy_task(*self.queued.pop(0))
+                self.run_job(*self.queued.pop(0))
             strategy.refresh_from_db()
             with self.subTest(indicator=name, candle=HISTORY + offset - 1):
                 self.assertEqual(strategy.position >= 2, bool(expected.at[offset, "owned"]))
