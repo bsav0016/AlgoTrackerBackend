@@ -88,7 +88,7 @@ python manage.py test
 
 `manage.py test` automatically uses `algo_tracker_backend.test_settings`: fake API keys, in-memory SQLite, an unreachable Redis, and a guard that fails any test that tries to open a non-local network connection. It ignores your `.env`, needs no services or secrets, and never contacts TwelveData, Stripe or Expo; those are mocked. Run one module with `python manage.py test api.tests.test_backtest_service`.
 
-The suite covers the indicators, backtest math, live signal handling and billing, and the account (including the password-reset flow, that reset codes are never logged, and the wrong-guess limit), backtest, strategy and payment APIs.
+The suite covers the indicators, backtest math, live signal handling (including the path from a stored price through the Redis candle list and the queued job to a buy or sell, run against an in-memory Redis) and billing, and the account (including the password-reset flow, that reset codes are never logged, and the wrong-guess limit), backtest, strategy and payment APIs.
 
 Static checks use Ruff (`pip install -r requirements-dev.txt`, then `ruff check --select E9,F63,F7,F82 .`, which flags syntax errors and undefined names).
 
@@ -152,7 +152,7 @@ The production server is currently paused. When it is brought back up:
 
 ## Limitations
 
-- Tests cover the core logic and API but not the websocket worker, the Redis price loader, or the Expo push client.
+- Tests cover the core logic and API but not the websocket worker, the TwelveData history loader, or the Expo push client. The live signal path is tested from the Redis price store onward.
 - Deploys are manual; CI only runs checks and tests.
 - Views, the Redis price loader and settings log through Python's `logging`; the websocket client and the Expo push client still use `print`, so their output is not leveled or routed by the logging config.
 - `requirements.txt` pins direct dependencies only, so transitive versions can still drift between builds.

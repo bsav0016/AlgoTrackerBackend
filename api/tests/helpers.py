@@ -58,3 +58,20 @@ class FakeRedis:
 
     def ttl(self, key):
         return self.ttls.get(key, -2)
+
+    # List commands, for the candle store. Index 0 is the head, as in Redis.
+    def lpush(self, key, value):
+        items = self.values.setdefault(key, [])
+        items.insert(0, value if isinstance(value, bytes) else str(value).encode())
+        return len(items)
+
+    def ltrim(self, key, start, stop):
+        self.values[key] = self.values.get(key, [])[start:stop + 1]
+
+    def lrange(self, key, start, stop):
+        items = self.values.get(key, [])
+        return items[start:] if stop == -1 else items[start:stop + 1]
+
+    def lindex(self, key, index):
+        items = self.values.get(key, [])
+        return items[index] if -len(items) <= index < len(items) else None
