@@ -127,6 +127,7 @@ class BacktestEndpointTests(APITestCase):
             "signal missing target": backtest_payload(signals=[{"name": "SMA", "above_target": True,
                                                                 "buy_signal": True}]),
             "non numeric target": backtest_payload(signals=[{**BUY_SMA, "target_value": "high"}]),
+            "missing window": backtest_payload(signals=[{k: v for k, v in BUY_SMA.items() if k != "window"}]),
         }
         for label, payload in cases.items():
             with self.subTest(label):
@@ -165,6 +166,35 @@ class StrategyEndpointTests(APITestCase):
                 response = self.client.post("/api/strategy/", self.payload(**override), format="json")
                 self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(Strategy.objects.exists())
+
+    BAD_SIGNALS = {
+        "unknown indicator": [{**BUY_SMA, "name": "FOO"}],
+        "missing window": [{k: v for k, v in BUY_SMA.items() if k != "window"}],
+        "zero window": [{**BUY_SMA, "window": 0}],
+        "window longer than the stored history": [{**BUY_SMA, "window": 501}],
+        "MACD without a signal window": [{"name": "MACD", "above_target": True, "buy_signal": True,
+                                          "target_value": 0.0, "fast_window": 3, "slow_window": 6}],
+        "no buy signal": [SELL_SMA],
+        "no signals": [],
+    }
+
+    def test_signals_that_could_never_work_are_rejected(self):
+        for label, signals in self.BAD_SIGNALS.items():
+            with self.subTest(label):
+                response = self.client.post("/api/strategy/", self.payload(signals=signals), format="json")
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(Strategy.objects.exists())
+
+    def test_a_strategy_with_only_a_buy_signal_is_accepted(self):
+        response = self.client.post("/api/strategy/", self.payload(signals=[BUY_SMA]), format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(Strategy.objects.get().sell_signals, [])
+
+    def test_macd_signals_are_accepted(self):
+        macd = {"name": "MACD", "above_target": True, "buy_signal": True, "target_value": 0.0,
+                "fast_window": 3, "slow_window": 6, "signal_window": 3}
+        response = self.client.post("/api/strategy/", self.payload(signals=[macd]), format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_invalid_payload_is_rejected(self):
         response = self.client.post("/api/strategy/", {"symbol": "AAPL"}, format="json")

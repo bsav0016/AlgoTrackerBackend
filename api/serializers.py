@@ -3,6 +3,7 @@ from rest_framework.exceptions import AuthenticationFailed
 from django.contrib.auth import authenticate
 from api.models import CustomUser, Strategy, Trade
 from django.conf import settings
+import math
 
 PROMO_CODES = settings.PROMO_CODES
 
@@ -24,6 +25,25 @@ class SignalSerializer(serializers.Serializer):
     fast_window = serializers.IntegerField(required=False, allow_null=True)
     slow_window = serializers.IntegerField(required=False, allow_null=True)
     signal_window = serializers.IntegerField(required=False, allow_null=True)
+
+    SIGNAL_WINDOWS = {
+        "RSI": ("window",), "SMA": ("window",), "EMA": ("window",), "SO": ("window",), "BBP": ("window",),
+        "ADX": ("window",), "MACD": ("fast_window", "slow_window", "signal_window"),
+    }
+    MAX_WINDOW = 500  # live strategies see at most the last 500 candles
+
+    def validate(self, attrs):
+        required = self.SIGNAL_WINDOWS.get(attrs["name"])
+        if required is None:
+            raise serializers.ValidationError({"name": f"Unknown indicator: {attrs['name']}"})
+        for field in required:
+            value = attrs.get(field)
+            if value is None or not 1 <= value <= self.MAX_WINDOW:
+                raise serializers.ValidationError(
+                    {field: f"{attrs['name']} needs {field} between 1 and {self.MAX_WINDOW}"})
+        if not math.isfinite(attrs["target_value"]):
+            raise serializers.ValidationError({"target_value": "Target value must be a finite number"})
+        return attrs
 
 
 class StrategySerializer(serializers.ModelSerializer):
@@ -113,3 +133,8 @@ class StrategyRequestSerializer(serializers.Serializer):
     symbol = serializers.CharField(max_length=50)
     interval = serializers.CharField(max_length=10)
     signals = SignalSerializer(many=True)
+
+    def validate_signals(self, signals):
+        if not any(signal["buy_signal"] for signal in signals):
+            raise serializers.ValidationError("A strategy needs at least one buy signal")
+        return signals
