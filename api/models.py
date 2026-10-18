@@ -116,6 +116,7 @@ class Strategy(models.Model):
     asset_return = models.DecimalField(default=1, max_digits=10, decimal_places=5)
     charge_user_date = models.DateTimeField(default=get_thirty_days_away)
     active = models.BooleanField(default=True)
+    last_processed_ts = models.BigIntegerField(null=True, blank=True)  # timestamp of the newest candle already evaluated
 
     def add_signals(self, signals: List[Signal]):
         updated_buy_signals = []
@@ -175,7 +176,14 @@ class Strategy(models.Model):
         combined_signals = buy_signal_objects + sell_signal_objects
         return combined_signals
 
-    def check_signals(self, prices):
+    def check_signals(self, prices, ts=None):
+        """Evaluate the newest candle in `prices` (chronological rows) and update position and returns.
+
+        `ts` is the timestamp of that candle; it is stored in `last_processed_ts` so a repeat or late job for
+        the same candle can be skipped. Needs at least two candles (the return is the change from the previous one).
+        """
+        if len(prices) < 2:
+            return
         signals = self.combine_signals()
         indicator_data = SignalService.calculate_indicators(prices, signals)
         indicator_data = BacktestService.find_buys(indicator_data, signals)
@@ -216,7 +224,11 @@ class Strategy(models.Model):
 
         if timezone.now() > self.charge_user_date:
             self.charge_user(INTERVAL_MAP[self.interval]['monthly_charge'])
-        self.save()
+            if self.pk is None:  # the user could not pay and the strategy was deleted; do not save it back
+                return
+        if ts is not None:
+            self.last_processed_ts = ts
+        self.save(update_fields=["position", "strategy_return", "asset_return", "charge_user_date", "last_processed_ts"])
         logger.info("Finished processing data")
 
     def send_notifications(self, message):

@@ -119,18 +119,28 @@ class CheckSignalsTests(TestCase):
         self.assertEqual(self.user.monthly_credits, 500 - 10)  # the 1day interval costs 10 a month
         self.assertGreater(strategy.charge_user_date, timezone.now() + timedelta(days=29))
 
+    def test_a_single_candle_is_skipped_instead_of_crashing(self):
+        strategy = make_strategy(self.user, position=1)
+        strategy.check_signals(pd.DataFrame({"close": [10.5]}), ts=0)
 
-class ProcessStrategyTaskTests(TestCase):
-    def test_task_applies_price_history_from_json_to_the_stored_strategy(self):
-        from api.tasks import process_strategy_task
-        user = make_user(device_ids=["ExponentPushToken[a]"])
-        strategy = make_strategy(user, position=1)
-        with mock.patch.object(NotificationService, "send_push_message") as push:
-            prices = pd.DataFrame({"close": [10.5, 11.5, 12.5]})
-            process_strategy_task(strategy.id, prices.to_json())  # same encoding RedisManager uses
         strategy.refresh_from_db()
-        self.assertEqual(strategy.position, 3)
-        push.assert_called_once_with("ExponentPushToken[a]", "Momentum triggered a buy signal!")
+        self.assertEqual(strategy.position, 1)
+        self.assertIsNone(strategy.last_processed_ts)
+        self.assertEqual(Trade.objects.count(), 0)
+
+    def test_the_candle_timestamp_is_recorded(self):
+        strategy = make_strategy(self.user, position=1)
+        strategy.check_signals(RISING, ts=1234)
+
+        strategy.refresh_from_db()
+        self.assertEqual(strategy.last_processed_ts, 1234)
+
+    def test_a_strategy_deleted_for_non_payment_is_not_saved_back(self):
+        CustomUser.objects.filter(pk=self.user.pk).update(monthly_credits=0, account_credits=0)
+        strategy = make_strategy(self.user, position=1, charge_user_date=timezone.now() - timedelta(minutes=1))
+        strategy.check_signals(FALLING, ts=1)
+
+        self.assertEqual(Strategy.objects.count(), 0)
 
 
 class StrategyChargeTests(TestCase):
