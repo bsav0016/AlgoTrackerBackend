@@ -112,10 +112,13 @@ class RedisManager:
 
     @staticmethod
     def get_recent_closes(symbol: str, interval: str, count=500):
-        """Retrieve the latest `count` close prices."""
+        """Retrieve the latest `count` close prices, oldest first.
+
+        The list is stored newest-first (lpush), but indicators and check_signals expect chronological rows.
+        """
         key = f"close_prices:{symbol}:{interval}"
         raw_data = redis_client.lrange(key, 0, count - 1)
-        return [json.loads(entry) for entry in raw_data]
+        return sorted((json.loads(entry) for entry in raw_data), key=lambda entry: entry["timestamp"])
 
     @staticmethod
     def clear_close_prices(symbol: str, interval: str):
