@@ -151,6 +151,13 @@ class CheckSignalsTests(TestCase):
         strategy.refresh_from_db()
         self.assertEqual(strategy.position, 3)
 
+    def test_a_zero_previous_price_does_not_crash(self):
+        strategy = make_strategy(self.user, position=2)
+        self.check(strategy, pd.DataFrame({"close": [0.0, 5.0]}))
+
+        strategy.refresh_from_db()
+        self.assertEqual(float(strategy.asset_return), 1.0)
+
     def test_a_single_candle_is_skipped_instead_of_crashing(self):
         strategy = make_strategy(self.user, position=1)
         self.check(strategy, pd.DataFrame({"close": [10.5]}), ts=0)

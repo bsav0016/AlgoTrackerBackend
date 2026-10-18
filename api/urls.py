@@ -2,11 +2,12 @@ from django.urls import path
 from api.views import (UserRegistrationView, LoginView, LogoutView, BacktestView, StrategyView, DeviceIDView,
                        AvailableSymbolsAndIntervalsView, PasswordResetRequestView, PasswordResetConfirmView,
                        StripePaymentView,StripePaymentConfirmationView, UserDetailsView, DeleteAccountView,
-                       PromoCodeAvailabilityView, RevenueCatCustomerView, RevenueCatConfirmationView)
+                       PromoCodeAvailabilityView, RevenueCatCustomerView, RevenueCatConfirmationView, HealthView)
 from rest_framework_simplejwt.views import TokenRefreshView
 
 
 urlpatterns = [
+    path('health/', HealthView.as_view(), name='health'),
     path('register/', UserRegistrationView.as_view(), name='user-registration'),
     path('promo-code-availability/', PromoCodeAvailabilityView.as_view(), name='promo-code-availability'),
     path('login/', LoginView.as_view(), name='login'),

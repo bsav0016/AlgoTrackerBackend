@@ -27,8 +27,18 @@ class CreditsUsedError(ValueError):
 
 class RedisManager:
     @staticmethod
-    async def populate_redis_all():
+    async def populate_redis_all(force: bool = False):
+        """Load history for every configured symbol and interval (the `seed_candles` command runs this).
+
+        A pair that already has candles is left alone, because history stored on top of live candles would
+        duplicate them; `force` clears it and loads again. Strategies are not run on history.
+        """
         unread_pairs = [[symbol, interval] for symbol in list(SYMBOLS.keys()) for interval in list(INTERVAL_MAP.keys())]
+        if force:
+            for symbol, interval in unread_pairs:
+                RedisManager.clear_close_prices(symbol, interval)
+        else:
+            unread_pairs = [pair for pair in unread_pairs if RedisManager.get_last_close_time(*pair) is None]
 
         while unread_pairs:
             end_date = datetime.now(tz=timezone.utc)
@@ -78,15 +88,17 @@ class RedisManager:
         if response.status_code == 200:
             data = response.json()
             if "values" in data:
-                df = pd.DataFrame(data["values"], columns=["datetime", "close"])
+                df = pd.DataFrame(data["values"], columns=["datetime", "close", "high", "low"])
                 df["datetime"] = pd.to_datetime(df["datetime"])
-                df["close"] = pd.to_numeric(df["close"], errors="coerce")
+                for column in ("close", "high", "low"):
+                    df[column] = pd.to_numeric(df[column], errors="coerce")
                 df = df[::-1].reset_index(drop=True)  # Reverse for chronological order
 
                 for _, row in df.iterrows():
                     timestamp = int(row["datetime"].timestamp())
-                    close_price = row["close"]
-                    await RedisManager.store_close_price(symbol, interval, close_price, timestamp)
+                    high, low = (None, None) if pd.isna(row["high"]) or pd.isna(row["low"]) else (row["high"], row["low"])
+                    await RedisManager.store_close_price(
+                        symbol, interval, row["close"], timestamp, high=high, low=low, enqueue_jobs=False)
                 return
 
             if "code" in data and data["code"] == 429:
@@ -98,11 +110,13 @@ class RedisManager:
 
     @staticmethod
     async def store_close_price(symbol: str, interval: str, close_price: float, timestamp: int, max_candles=500,
-                                high: float = None, low: float = None):
+                                high: float = None, low: float = None, enqueue_jobs: bool = True):
         """Store a close price in Redis, keeping only the last `max_candles` values.
 
-        `high` and `low` are stored with the close when given (live candles), because the SO and ADX
-        indicators need them. History loaded from TwelveData has only closes.
+        `high` and `low` are stored with the close when given, because the SO and ADX
+        indicators need them.
+
+        `enqueue_jobs=False` stores the candle without checking strategies on it (used when loading history).
         """
         from api.models import Strategy
         key = f"close_prices:{symbol}:{interval}"
@@ -114,6 +128,8 @@ class RedisManager:
         await sync_to_async(redis_client.lpush)(key, data)
         await sync_to_async(redis_client.ltrim)(key, 0, max_candles - 1)
 
+        if not enqueue_jobs:
+            return
         strategy_ids = await sync_to_async(list)(Strategy.objects.filter(symbol=symbol, interval=interval).values_list('id', flat=True))
         if strategy_ids:
             for strategy_id in strategy_ids:
@@ -145,6 +161,17 @@ class RedisManager:
         await sync_to_async(redis_client.set)(key, json.dumps(candle))
 
     @staticmethod
+    def mark_tick(now: int):
+        """Remember when the websocket worker last received a price (shown by the health endpoint)."""
+        redis_client.set("last_tick_at", now)
+
+    @staticmethod
+    def seconds_since_last_tick(now: int):
+        """Seconds since the last price arrived, or None if none has been seen."""
+        raw = redis_client.get("last_tick_at")
+        return None if raw is None else max(0, now - int(raw))
+
+    @staticmethod
     def get_recent_closes(symbol: str, interval: str, count=500):
         """Retrieve the latest `count` close prices, oldest first.
 
@@ -152,7 +179,10 @@ class RedisManager:
         """
         key = f"close_prices:{symbol}:{interval}"
         raw_data = redis_client.lrange(key, 0, count - 1)
-        return sorted((json.loads(entry) for entry in raw_data), key=lambda entry: entry["timestamp"])
+        newest_first = {}
+        for entry in map(json.loads, raw_data):
+            newest_first.setdefault(entry["timestamp"], entry)  # seeded history may overlap a live candle: keep the newer write
+        return sorted(newest_first.values(), key=lambda entry: entry["timestamp"])
 
     @staticmethod
     def clear_close_prices(symbol: str, interval: str):

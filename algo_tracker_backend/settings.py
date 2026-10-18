@@ -283,3 +283,13 @@ if PROMO_CODE_AVAILABILITY_STR == 'True' or PROMO_CODE_AVAILABILITY_STR == 'true
     PROMO_CODE_AVAILABILITY = True
 else:
     PROMO_CODE_AVAILABILITY = False
+
+
+# Logging: one line per event on stderr (docker logs); LOG_LEVEL=DEBUG also logs every price tick.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain"}},
+    "root": {"handlers": ["console"], "level": os.getenv("LOG_LEVEL", "INFO").upper()},
+}

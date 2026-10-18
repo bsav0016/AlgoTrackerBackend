@@ -35,6 +35,13 @@ services:
       REDIS_URL: redis://redis:6379/0
     volumes:
       - ./${FIREBASE_CREDENTIALS_PATH}:/app/${FIREBASE_CREDENTIALS_PATH}:ro
+    healthcheck:
+      # Sends the first allowed host as the Host header, so ALLOWED_HOSTS does not reject the request.
+      test: ["CMD", "python", "-c", "import os, urllib.request as u; h = os.environ.get('ALLOWED_HOSTS', 'localhost').split(',')[0].strip(); u.urlopen(u.Request('http://127.0.0.1:8000/api/health/', headers={'Host': h}), timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     depends_on:
       db:
         condition: service_healthy
