@@ -41,6 +41,9 @@ class FakeRedis:
         self.values[key] = str(value).encode()
         self.ttls[key] = seconds
 
+    def set(self, key, value):
+        self.values[key] = value if isinstance(value, bytes) else str(value).encode()
+
     def get(self, key):
         return self.values.get(key)
 

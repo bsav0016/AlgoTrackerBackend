@@ -35,12 +35,10 @@ async def on_message(message):
                 print(f"Subscription failed: {data}")
 
         elif "symbol" in data and "price" in data:
+            current_timestamp = int(datetime.now(timezone.utc).timestamp())
             for interval_key, interval_values in INTERVAL_MAP.items():
-                last_close_time = RedisManager.get_last_close_time(data["symbol"], interval_key)
-                current_timestamp = int(datetime.now(timezone.utc).timestamp())
-                if last_close_time is None or (current_timestamp - last_close_time >= interval_values['seconds']):
-                    await RedisManager.store_close_price(data["symbol"], interval_key, data["price"], current_timestamp)
-                    print("Saved data")
+                await RedisManager.record_tick(
+                    data["symbol"], interval_key, float(data["price"]), current_timestamp, interval_values['seconds'])
 
     except json.JSONDecodeError as e:
         print(f"JSON decoding error: {e}")

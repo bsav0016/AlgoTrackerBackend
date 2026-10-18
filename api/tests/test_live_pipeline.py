@@ -3,7 +3,7 @@ from unittest import mock
 from asgiref.sync import async_to_sync
 from django.test import TestCase
 
-from api.models import Trade
+from api.models import Strategy, Trade
 from api.redis_manager import RedisManager
 from api.services.notification_service import NotificationService
 from api.tasks import process_strategy_task
@@ -18,9 +18,9 @@ DAY = 86400
 
 # Realistic prices have cents. (pd.read_json turns a window of all-whole-number closes into int64,
 # which Django's DecimalField rejects when the Trade is saved.)
-class LivePipelineTests(TestCase):
+class LivePipelineCase(TestCase):
     """store_close_price -> get_recent_closes -> process_strategy_task -> check_signals, with Redis
-    replaced by an in-memory fake and the RQ queue run inline. Push delivery is mocked."""
+    replaced by an in-memory fake and the RQ queue run by the test. Push delivery is mocked."""
 
     def setUp(self):
         self.redis = FakeRedis()
@@ -48,6 +48,8 @@ class LivePipelineTests(TestCase):
         while self.queued:
             process_strategy_task(*self.queued.pop(0))
 
+
+class LivePipelineTests(LivePipelineCase):
     def test_recent_closes_come_back_oldest_first(self):
         self.store([10.0, 11.0, 12.0])
 
@@ -99,3 +101,50 @@ class LivePipelineTests(TestCase):
 
         strategy.refresh_from_db()
         self.assertAlmostEqual(float(strategy.asset_return), 12.5 / 11.5, places=4)
+
+
+class LiveHighLowIndicatorTests(LivePipelineCase):
+    """SO and ADX need each candle's high and low. Candles built from ticks carry them to the job."""
+
+    def history(self, candles):
+        """Stores finished candles (timestamp index, high, low, close) before anyone is subscribed."""
+        for i, (high, low, close) in enumerate(candles):
+            async_to_sync(RedisManager.store_close_price)(SYMBOL, INTERVAL, close, i * DAY, high=high, low=low)
+
+    def tick_day(self, day, prices):
+        for j, price in enumerate(prices):
+            async_to_sync(RedisManager.record_tick)(SYMBOL, INTERVAL, price, day * DAY + j * 60, DAY)
+        while self.queued:
+            process_strategy_task(*self.queued.pop(0))
+
+    def subscribe(self, name, buy_above, sell_below):
+        """A strategy that buys when the indicator is above `buy_above` and sells when it is below `sell_below`."""
+        signal = {"above_target": True, "window": 2}
+        return Strategy.objects.create(
+            user=self.user, title="Momentum", symbol=SYMBOL, interval=INTERVAL, position=1,
+            buy_signals=[{**signal, "name": name, "target_value": buy_above}],
+            sell_signals=[{**signal, "name": name, "above_target": False, "target_value": sell_below}])
+
+    def test_a_stochastic_oscillator_strategy_signals_from_live_ticks(self):
+        self.history([(10.0, 9.0, 9.8)])
+        strategy = self.subscribe("SO", buy_above=80, sell_below=20)
+
+        self.tick_day(1, [9.9, 10.8, 9.8, 10.5])  # close 10.5 in a 9.0-10.8 range
+        self.tick_day(2, [10.6])  # first tick of the next day closes day 1
+
+        strategy.refresh_from_db()
+        self.assertEqual(strategy.position, 3)
+        trade = Trade.objects.get()
+        self.assertTrue(trade.is_buy)
+        self.assertEqual(float(trade.price), 10.5)
+
+    def test_an_adx_strategy_signals_from_live_ticks(self):
+        self.history([(10.0, 9.0, 9.5), (11.0, 10.0, 10.5), (12.0, 11.0, 11.5)])
+        strategy = self.subscribe("ADX", buy_above=50, sell_below=10)
+
+        self.tick_day(3, [12.0, 13.0, 11.9, 12.5])
+        self.tick_day(4, [12.6])
+
+        strategy.refresh_from_db()
+        self.assertEqual(strategy.position, 3)
+        self.assertTrue(Trade.objects.get().is_buy)
