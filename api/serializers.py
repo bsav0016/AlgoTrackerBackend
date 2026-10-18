@@ -56,8 +56,9 @@ class StrategySerializer(serializers.ModelSerializer):
         model = Strategy
         fields = [
             'id', 'title', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'strategy_return', 'asset_return',
-            'position', 'charge_user_date', 'active', 'trades'
+            'position', 'charge_user_date', 'active', 'last_processed_ts', 'trades'
         ]
+        read_only_fields = ['last_processed_ts']  # the live job sets it: the open time (Unix seconds) of the newest candle checked
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
