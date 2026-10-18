@@ -33,3 +33,6 @@ from .settings import *  # noqa: E402,F401,F403
 
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 TEST_RUNNER = "algo_tracker_backend.test_runner.NoExternalNetworkRunner"
+
+# Expected errors (the tests exercise failure paths) would otherwise fill the test output.
+LOGGING["handlers"]["console"]["level"] = "CRITICAL"

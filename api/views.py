@@ -1,12 +1,13 @@
 import hmac
 import logging
 import math
+import time
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.conf import settings
-from django.db import transaction
+from django.db import connection, transaction
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from api.serializers import (UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
@@ -206,6 +207,31 @@ class DeviceIDView(APIView):
             return Response({"message": "Device ID removed successfully"}, status=status.HTTP_200_OK)
         else:
             return Response({"error": "Device ID not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
+class HealthView(APIView):
+    """Liveness for the container healthcheck and monitoring: is the database up, is Redis up, and how long
+    since the websocket worker last received a price. A quiet feed (a closed market) does not fail the check."""
+    authentication_classes = []
+    permission_classes = [AllowAny, ]
+
+    def get(self, request):
+        database = redis = True
+        try:
+            connection.ensure_connection()
+        except Exception:
+            logger.exception("Health check: database unavailable")
+            database = False
+        seconds_since_last_tick = None
+        try:
+            seconds_since_last_tick = RedisManager.seconds_since_last_tick(int(time.time()))
+        except Exception:
+            logger.exception("Health check: Redis unavailable")
+            redis = False
+        healthy = database and redis
+        return Response({"status": "ok" if healthy else "unavailable", "database": database, "redis": redis,
+                         "seconds_since_last_tick": seconds_since_last_tick},
+                        status=status.HTTP_200_OK if healthy else status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
 class AvailableSymbolsAndIntervalsView(APIView):

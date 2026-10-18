@@ -3,7 +3,10 @@ import asyncio
 from django.conf import settings
 from api.redis_manager import RedisManager
 import json
+import logging
 from datetime import timezone, datetime
+
+logger = logging.getLogger(__name__)
 
 SYMBOLS = settings.SYMBOLS
 TWELVE_DATA_API_KEY = settings.TWELVE_DATA_API_KEY
@@ -21,7 +24,7 @@ async def on_open(ws):
             }
         }))
     except Exception as e:
-        print(f"Error sending subscription request: {e}")
+        logger.exception("Error sending subscription request")
 
 
 async def on_message(message):
@@ -29,22 +32,25 @@ async def on_message(message):
     try:
         data = json.loads(message)
 
-        print(data)
+        logger.debug("Message: %s", data)
         if data.get("event") == "subscribe-status":
-            if not data.get("status") == "ok":
-                print(f"Subscription failed: {data}")
+            if data.get("status") == "ok":
+                logger.info("Subscribed to price feed")
+            else:
+                logger.error("Subscription failed: %s", data)
 
         elif "symbol" in data and "price" in data:
             current_timestamp = int(datetime.now(timezone.utc).timestamp())
+            RedisManager.mark_tick(current_timestamp)
             for interval_key, interval_values in INTERVAL_MAP.items():
                 await RedisManager.record_tick(
                     data["symbol"], interval_key, float(data["price"]), current_timestamp, interval_values['seconds'])
 
     except json.JSONDecodeError as e:
-        print(f"JSON decoding error: {e}")
+        logger.error("JSON decoding error: %s", e)
         raise e
     except Exception as e:
-        print(f"Error processing message: {e}")
+        logger.exception("Error processing message")
         raise e
 
 
@@ -65,9 +71,9 @@ async def connect_to_twelvedata():
             if str(e) == "no close frame received or sent":
                 continue
             else:
-                print(f"WebSocket connection lost: {e}. Reconnecting in 5 seconds...")
+                logger.warning("WebSocket connection lost: %s. Reconnecting in 5 seconds", e)
                 await asyncio.sleep(5)
 
         except Exception as e:
-            print(f"Unexpected error: {e}. Retrying in 5 seconds...")
+            logger.exception("Unexpected WebSocket error; retrying in 5 seconds")
             await asyncio.sleep(5)

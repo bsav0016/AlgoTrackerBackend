@@ -76,6 +76,7 @@ python manage.py createsuperuser
 python manage.py runserver            # API on http://localhost:8000
 python manage.py rqworker default     # optional: strategy checks (needs Redis)
 python websocket_worker.py            # optional: live TwelveData prices (needs Redis and an API key)
+python manage.py seed_candles         # optional: load recent candles so strategies have history (uses TwelveData credits)
 ```
 
 Point the mobile app at `http://<your machine>:8000/` (see the frontend README).
@@ -109,7 +110,10 @@ Static checks use Ruff (`pip install -r requirements-dev.txt`, then `ruff check 
    docker compose exec web python manage.py migrate
    docker compose exec web python manage.py createsuperuser
    ```
-5. Point the app's `API_URL` at the server (for example `http://localhost:8000`, or your `DOMAIN`).
+5. Optional, on a fresh Redis: `docker compose exec web python manage.py seed_candles` loads recent candles (with highs and lows) so strategies have history straight away. Pairs that already have candles are skipped, `--force` reloads them, and strategies are not run on history.
+6. Point the app's `API_URL` at the server (for example `http://localhost:8000`, or your `DOMAIN`).
+
+`GET /api/health/` (no login) reports whether the database and Redis are up and how many seconds since the websocket worker last received a price (`null` if none yet); it returns 503 if the database or Redis is down. A quiet feed is not an error, since markets close. The `web` container uses it as its healthcheck. Logs go to stderr (`docker compose logs worker-websocket`); set `LOG_LEVEL=DEBUG` to log every price message.
 
 Production runs the same compose file on a single DigitalOcean droplet; deploys are manual (`git pull`, `docker compose up --build -d`).
 
@@ -152,7 +156,7 @@ The production server is currently paused. When it is brought back up:
 
 ## Limitations
 
-- Tests cover the core logic and API but not the websocket worker, the TwelveData history loader, or the Expo push client. The live signal path is tested from `RedisManager.record_tick` onward. Gaps in the feed leave missing candles (empty intervals are skipped, not filled). A candle that was open while the worker was down is stored with only the ticks it saw. History loaded from TwelveData has closes only, so Stochastic Oscillator and ADX strategies only signal once enough live candles have built up.
+- Tests cover the core logic and API but not the websocket worker, the TwelveData history loader, or the Expo push client. The live signal path is tested from `RedisManager.record_tick` onward. Gaps in the feed leave missing candles (empty intervals are skipped, not filled). A candle that was open while the worker was down is stored with only the ticks it saw. Run `seed_candles` on a fresh Redis, otherwise strategies only signal once enough live candles have built up.
 - Live signals look at the last 500 candles and backtests at up to 5000, so recursive indicators (EMA, MACD, ADX) can differ slightly between the two on long histories. A strategy with no sell signal buys and holds. Windows are capped at 500.
 - Pushes are sent after the trade commits, so if the worker dies between the commit and the send, that notification is lost rather than repeated.
 - Deploys are manual; CI only runs checks and tests.

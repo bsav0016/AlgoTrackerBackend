@@ -191,9 +191,7 @@ class Strategy(models.Model):
 
         current_close = indicator_data.iloc[-1]
         prev_close = indicator_data.iloc[-2]
-        asset_change = Decimal(current_close["close"] / prev_close["close"])
-        if asset_change is None:
-            asset_change = Decimal(1)
+        asset_change = Decimal(current_close["close"] / prev_close["close"]) if prev_close["close"] else Decimal(1)
 
         if self.position >= 2:
             self.strategy_return = self.strategy_return * asset_change

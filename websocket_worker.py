@@ -6,6 +6,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "algo_tracker_backend.settings")
 django.setup()
 
 import asyncio
+import logging
 from api.websocket_client import connect_to_twelvedata
 
 async def run_websocket():
@@ -14,7 +15,7 @@ async def run_websocket():
         try:
             await connect_to_twelvedata()
         except Exception as e:
-            print(f"WebSocket Error: {e}")
+            logging.getLogger(__name__).exception("WebSocket worker error")
             await asyncio.sleep(5)  # Wait before retrying
 
 if __name__ == "__main__":

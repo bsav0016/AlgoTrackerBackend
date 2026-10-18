@@ -10,6 +10,7 @@ from exponent_server_sdk import (
 import os
 import requests
 from requests.exceptions import ConnectionError, HTTPError
+import logging
 import threading
 
 # Optionally providing an access token within a session if you have enabled push security
@@ -23,6 +24,7 @@ session.headers.update(
 )
 
 MAX_RETRIES = 5
+logger = logging.getLogger(__name__)
 
 class NotificationService:
     #@staticmethod
@@ -50,15 +52,15 @@ class NotificationService:
                             data=extra))
         except PushServerError as exc:
             # Encountered some likely formatting/validation error.
-            print("Formatting or validation error: ", exc)
+            logger.error("Push formatting or validation error: %s", exc)
             raise
         except (ConnectionError, HTTPError) as exc:
             # Encountered some Connection or HTTP error - retry a few times in
             # case it is transient.
-            print("Push notification failed")
+            logger.warning("Push notification failed")
             if attempts < MAX_RETRIES:
                 wait_time = 2 ** attempts
-                print(f"Retrying in {wait_time} seconds...")
+                logger.info("Retrying push in %s seconds", wait_time)
                 threading.Timer(wait_time, NotificationService.send_push_message,
                                 args=[token, message, extra, attempts + 1]).start()
                 return
@@ -76,10 +78,10 @@ class NotificationService:
             pass
         except PushTicketError as exc:
             # Encountered some other per-notification error.
-            print("Push notification failed")
+            logger.warning("Push notification failed")
             if attempts < MAX_RETRIES:
                 wait_time = 2 ** attempts
-                print(f"Retrying in {wait_time} seconds...")
+                logger.info("Retrying push in %s seconds", wait_time)
                 threading.Timer(wait_time, NotificationService.send_push_message,
                                 args=[token, message, extra, attempts + 1]).start()
             else:
