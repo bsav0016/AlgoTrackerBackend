@@ -16,8 +16,6 @@ DAY = 86400
 
 
 
-# Realistic prices have cents. (pd.read_json turns a window of all-whole-number closes into int64,
-# which Django's DecimalField rejects when the Trade is saved.)
 class LivePipelineCase(TestCase):
     """store_close_price -> get_recent_closes -> process_strategy_task -> check_signals, with Redis
     replaced by an in-memory fake and the RQ queue run by the test. Push delivery is mocked."""
@@ -101,6 +99,101 @@ class LivePipelineTests(LivePipelineCase):
 
         strategy.refresh_from_db()
         self.assertAlmostEqual(float(strategy.asset_return), 12.5 / 11.5, places=4)
+
+
+class IdempotentJobTests(LivePipelineCase):
+    """The same candle may be delivered twice, or two candles' jobs may run in the wrong order."""
+
+    def history_then_subscribe(self, closes, position):
+        self.store(closes)  # nobody subscribed yet, so no jobs
+        return make_strategy(self.user, position=position)
+
+    def queue_candle(self, close, day):
+        async_to_sync(RedisManager.store_close_price)(SYMBOL, INTERVAL, close, day * DAY)
+        return self.queued.pop(0)
+
+    def test_running_the_same_job_twice_trades_and_notifies_once(self):
+        strategy = self.history_then_subscribe([10.5, 11.5], position=1)
+        job = self.queue_candle(12.5, 2)
+
+        process_strategy_task(*job)
+        process_strategy_task(*job)
+
+        strategy.refresh_from_db()
+        self.assertEqual(strategy.position, 3)
+        self.assertEqual(Trade.objects.count(), 1)
+        self.push.assert_called_once()
+        self.assertEqual(strategy.last_processed_ts, 2 * DAY)
+        self.assertAlmostEqual(float(strategy.asset_return), 12.5 / 11.5, places=4)
+
+    def test_an_older_candles_job_after_a_newer_one_is_skipped(self):
+        strategy = self.history_then_subscribe([10.5, 11.5], position=1)
+        older = self.queue_candle(12.5, 2)
+        newer = self.queue_candle(13.5, 3)
+
+        process_strategy_task(*newer)
+        process_strategy_task(*older)
+
+        strategy.refresh_from_db()
+        self.assertEqual(strategy.last_processed_ts, 3 * DAY)
+        self.assertEqual(Trade.objects.count(), 1)
+        self.assertEqual(float(Trade.objects.get().price), 13.5)
+        self.push.assert_called_once()
+
+    def test_a_job_only_sees_candles_up_to_its_own_timestamp(self):
+        strategy = self.history_then_subscribe([10.5, 11.5], position=1)
+        older = self.queue_candle(12.5, 2)
+        self.queue_candle(9.5, 3)  # arrives before the older job runs; must not leak into it
+
+        process_strategy_task(*older)
+
+        strategy.refresh_from_db()
+        self.assertEqual(strategy.position, 3)
+        self.assertEqual(float(Trade.objects.get().price), 12.5)
+
+    def test_jobs_in_order_each_process_their_candle(self):
+        strategy = self.history_then_subscribe([10.5, 11.5], position=1)
+        first = self.queue_candle(12.5, 2)
+        second = self.queue_candle(13.5, 3)
+
+        process_strategy_task(*first)
+        process_strategy_task(*second)
+
+        strategy.refresh_from_db()
+        self.assertEqual(strategy.last_processed_ts, 3 * DAY)
+        self.assertAlmostEqual(float(strategy.asset_return), (12.5 / 11.5) * (13.5 / 12.5), places=4)
+
+    def test_whole_number_prices_can_be_saved_on_a_trade(self):
+        # The job used to rebuild prices with pd.read_json, which turned an all-whole-number window into
+        # int64 and made Trade.save() fail on its DecimalField.
+        strategy = self.history_then_subscribe([10.0, 11.0], position=1)
+        job = self.queue_candle(12.0, 2)
+
+        process_strategy_task(*job)
+
+        strategy.refresh_from_db()
+        self.assertEqual(strategy.position, 3)
+        self.assertEqual(float(Trade.objects.get().price), 12.0)
+
+    def test_a_job_for_a_deleted_strategy_does_nothing(self):
+        strategy = self.history_then_subscribe([10.5, 11.5], position=1)
+        job = self.queue_candle(12.5, 2)
+        strategy.delete()
+
+        process_strategy_task(*job)
+
+        self.assertEqual(Strategy.objects.count(), 0)
+        self.push.assert_not_called()
+
+    def test_the_first_candle_alone_is_skipped_without_error(self):
+        strategy = make_strategy(self.user, position=1)
+        job = self.queue_candle(10.5, 0)
+
+        process_strategy_task(*job)
+
+        strategy.refresh_from_db()
+        self.assertEqual(strategy.position, 1)
+        self.assertIsNone(strategy.last_processed_ts)
 
 
 class LiveHighLowIndicatorTests(LivePipelineCase):

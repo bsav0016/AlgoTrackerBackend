@@ -116,10 +116,8 @@ class RedisManager:
 
         strategy_ids = await sync_to_async(list)(Strategy.objects.filter(symbol=symbol, interval=interval).values_list('id', flat=True))
         if strategy_ids:
-            prices_json = pd.DataFrame(RedisManager.get_recent_closes(symbol, interval)).to_json()
             for strategy_id in strategy_ids:
-                #process_strategy_task(strategy_id, prices_json)
-                process_strategy_task.delay(strategy_id, prices_json)
+                process_strategy_task.delay(strategy_id, symbol, interval, timestamp)
 
     @staticmethod
     async def record_tick(symbol: str, interval: str, price: float, timestamp: int, seconds: int):
