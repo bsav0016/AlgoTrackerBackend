@@ -195,7 +195,7 @@ RQ_DB = 0
 if parsed_url.path:
     try:
         RQ_DB = int(parsed_url.path.lstrip('/'))
-    except:
+    except ValueError:
         RQ_DB = 0
 
 RQ_QUEUES = {
@@ -251,15 +251,15 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', default='')
 #Funds information
 try:
     BACKTEST_BASE_COST = float(os.getenv('BACKTEST_BASE_COST', 3))
-except:
+except ValueError:
     BACKTEST_BASE_COST = 3
 try:
     BACKTEST_ITERATIONS = int(os.getenv('BACKTEST_ITERATIONS', 5))
-except:
+except ValueError:
     BACKTEST_ITERATIONS = 5
 try:
     MONTHLY_CREDITS = int(os.getenv('MONTHLY_CREDITS', 500))
-except:
+except ValueError:
     MONTHLY_CREDITS = 500
 
 

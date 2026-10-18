@@ -1,4 +1,5 @@
 import hmac
+import logging
 import math
 from rest_framework import status
 from rest_framework.response import Response
@@ -21,6 +22,8 @@ from django.core.mail import send_mail
 from api.redis_manager import RedisManager
 import stripe
 from stripe import StripeError
+
+logger = logging.getLogger(__name__)
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -81,7 +84,7 @@ class UserRegistrationView(APIView):
         except ValidationError as e:
             return Response({"detail": e}, status=status.HTTP_409_CONFLICT)
         except Exception as e:
-            print(e)
+            logger.exception("Error registering user")
             return Response({"detail": "Error registering user"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -301,7 +304,7 @@ class BacktestView(APIView):
 
                 return Response(response_data, status=status.HTTP_200_OK)
             except Exception as e:
-                print(f"Error: {e}")
+                logger.exception("Error building response")
                 return Response({"detail": "Internal Error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -337,7 +340,7 @@ class StrategyView(APIView):
                 return Response({"message": "Successfully subscribed strategy"}, status=status.HTTP_200_OK)
 
             except Exception as e:
-                print("Strategy view internal error: ", e)
+                logger.exception("Strategy view internal error")
                 return Response({"detail": "Internal Error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -354,7 +357,7 @@ class StrategyView(APIView):
         except ObjectDoesNotExist:
             return Response({"detail": "Strategy not found."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            print(e)
+            logger.exception("Strategy lookup failed")
             return Response({"detail": "Internal error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -491,7 +494,6 @@ class StripePaymentConfirmationView(APIView):
                 user.add_funds(amount)
                 user.save()
                 saved_payment_intent.delete()
-                print("Success")
 
                 return Response({"message": "Payment successful, funds added."}, status=status.HTTP_200_OK)
             except ObjectDoesNotExist:
@@ -526,7 +528,7 @@ class RevenueCatCustomerView(APIView):
             return Response({"message": "Transaction completed successfully"}, status=status.HTTP_200_OK)
 
         except Exception as e:
-            print(e)
+            logger.exception("Payment confirmation failed")
             return Response({"detail": "Internal Server Error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -604,5 +606,5 @@ class RevenueCatConfirmationView(APIView):
                 return Response({"message": "Confirmation created but not completed"}, status=status.HTTP_200_OK)
 
         except Exception as e:
-            print("Failed to process RevenueCat confirmation: ", e)
+            logger.exception("Failed to process RevenueCat confirmation")
             return Response({"detail": "Internal Server Error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

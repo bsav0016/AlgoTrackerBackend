@@ -154,6 +154,7 @@ The production server is currently paused. When it is brought back up:
 
 - Tests cover the core logic and API but not the websocket worker, the Redis price loader, or the Expo push client.
 - Deploys are manual; CI only runs checks and tests.
+- Views, the Redis price loader and settings log through Python's `logging`; the websocket client and the Expo push client still use `print`, so their output is not leveled or routed by the logging config.
 - `requirements.txt` pins direct dependencies only, so transitive versions can still drift between builds.
 - RevenueCat webhook deliveries are not de-duplicated: a processed transaction is deleted, so a retried delivery could credit twice (see the expected-failure test in `api/tests/test_api_payments.py`).
 - Prices come from a third-party feed (TwelveData); symbols are limited to the configured `SYMBOLS` list.
