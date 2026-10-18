@@ -76,7 +76,8 @@ class RedisManager:
             "symbol": symbol,
             "interval": interval,
             "outputsize": 500,
-            "end_date": end_date.strftime("%Y-%m-%d"),
+            # With a date alone intraday history stops at midnight UTC, leaving a gap up to now.
+            "end_date": end_date.strftime("%Y-%m-%d %H:%M:%S"),
             "apikey": TWELVE_DATA_API_KEY
         }
 

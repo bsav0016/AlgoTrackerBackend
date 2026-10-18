@@ -177,6 +177,14 @@ SIMPLE_JWT = {
 #Redis
 REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 parsed_url = urlparse(REDIS_URL)
+REDIS_USE_SSL = REDIS_URL.startswith("rediss")
+
+
+def redis_pool_kwargs(url):
+    """Extra connection options. Only a TLS (rediss://) connection takes ssl_cert_reqs; redis-py raises
+    TypeError on every connection to a plain redis:// one (which is what docker-compose.yml uses)."""
+    return {"ssl_cert_reqs": None} if url.startswith("rediss") else {}
+
 
 CACHES = {
     "default": {
@@ -184,9 +192,7 @@ CACHES = {
         "LOCATION": REDIS_URL,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            "CONNECTION_POOL_KWARGS": {
-                "ssl_cert_reqs": None
-            },
+            "CONNECTION_POOL_KWARGS": redis_pool_kwargs(REDIS_URL),
         }
     }
 }
@@ -204,8 +210,8 @@ RQ_QUEUES = {
         'PORT': parsed_url.port,
         'DB': RQ_DB,
         'PASSWORD': parsed_url.password,
-        'USE_SSL': REDIS_URL.startswith("rediss"),
-        'SSL_CERT_REQS': None
+        'USE_SSL': REDIS_USE_SSL,
+        **({'SSL_CERT_REQS': None} if REDIS_USE_SSL else {}),
     }
 }
 
@@ -292,4 +298,6 @@ LOGGING = {
     "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"}},
     "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain"}},
     "root": {"handlers": ["console"], "level": os.getenv("LOG_LEVEL", "INFO").upper()},
+    # These log the full request URL or headers at DEBUG, and the TwelveData API key is in both.
+    "loggers": {name: {"level": "WARNING"} for name in ("urllib3", "websockets", "requests")},
 }
