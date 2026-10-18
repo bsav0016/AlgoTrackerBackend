@@ -160,6 +160,14 @@ class StrategyEndpointTests(APITestCase):
         strategies = self.client.get("/api/user-details/").data["strategies"]
         self.assertEqual([s["title"] for s in strategies], ["Momentum"])
 
+    def test_user_details_show_when_a_strategy_was_last_checked(self):
+        Strategy.objects.create(user=self.user, symbol="AAPL", interval="1day", title="Checked",
+                                last_processed_ts=1700000000)
+        Strategy.objects.create(user=self.user, symbol="AAPL", interval="1day", title="New")
+        strategies = self.client.get("/api/user-details/").data["strategies"]
+        self.assertEqual({s["title"]: s["last_processed_ts"] for s in strategies},
+                         {"Checked": 1700000000, "New": None})
+
     def test_unsupported_symbol_or_interval_is_rejected(self):
         for override in ({"symbol": "TSLA"}, {"interval": "5min"}):
             with self.subTest(override=override):
