@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import asyncio
 import logging
 from django_redis import get_redis_connection
+from api.candles import bucket_start, merge_tick, new_candle
 
 logger = logging.getLogger(__name__)
 
@@ -96,11 +97,19 @@ class RedisManager:
         raise Exception(f"API request failed with status {response.status_code}: {response.text}")
 
     @staticmethod
-    async def store_close_price(symbol: str, interval: str, close_price: float, timestamp: int, max_candles=500):
-        """Store a close price in Redis, keeping only the last `max_candles` values."""
+    async def store_close_price(symbol: str, interval: str, close_price: float, timestamp: int, max_candles=500,
+                                high: float = None, low: float = None):
+        """Store a close price in Redis, keeping only the last `max_candles` values.
+
+        `high` and `low` are stored with the close when given (live candles), because the SO and ADX
+        indicators need them. History loaded from TwelveData has only closes.
+        """
         from api.models import Strategy
         key = f"close_prices:{symbol}:{interval}"
-        data = json.dumps({"timestamp": timestamp, "close": close_price})
+        entry = {"timestamp": timestamp, "close": close_price}
+        if high is not None and low is not None:
+            entry.update(high=high, low=low)
+        data = json.dumps(entry)
 
         await sync_to_async(redis_client.lpush)(key, data)
         await sync_to_async(redis_client.ltrim)(key, 0, max_candles - 1)
@@ -111,6 +120,31 @@ class RedisManager:
             for strategy_id in strategy_ids:
                 #process_strategy_task(strategy_id, prices_json)
                 process_strategy_task.delay(strategy_id, prices_json)
+
+    @staticmethod
+    async def record_tick(symbol: str, interval: str, price: float, timestamp: int, seconds: int):
+        """Fold one price tick into the candle for its `seconds`-long bucket.
+
+        The candle being built is kept in Redis. When a tick lands in a later bucket, the finished candle is
+        stored (with its high and low) and strategies are checked on it; a candle is only ever stored once, and
+        buckets with no ticks produce no candle. A tick for an earlier bucket than the open one is ignored.
+        """
+        key = f"open_candle:{symbol}:{interval}"
+        bucket = bucket_start(timestamp, seconds)
+        raw = await sync_to_async(redis_client.get)(key)
+        candle = json.loads(raw) if raw else None
+
+        if candle is not None and bucket < candle["timestamp"]:
+            return
+        if candle is not None and bucket == candle["timestamp"]:
+            candle = merge_tick(candle, price)
+        else:
+            if candle is not None:
+                await RedisManager.store_close_price(
+                    symbol, interval, candle["close"], candle["timestamp"], high=candle["high"], low=candle["low"])
+            candle = new_candle(bucket, price)
+
+        await sync_to_async(redis_client.set)(key, json.dumps(candle))
 
     @staticmethod
     def get_recent_closes(symbol: str, interval: str, count=500):
