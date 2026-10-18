@@ -36,9 +36,21 @@ class FindBuysAndSellsTests(SimpleTestCase):
         out = BacktestService.find_sells(self.data, signals)
         self.assertEqual(list(out["sell"]), [False, False, False, True])
 
-    def test_without_signals_everything_is_true(self):
+    def test_without_buy_signals_every_row_is_a_buy(self):
         self.assertTrue(BacktestService.find_buys(self.data, [])["buy"].all())
-        self.assertTrue(BacktestService.find_sells(self.data, [])["sell"].all())
+
+    def test_without_sell_signals_no_row_is_a_sell(self):
+        buy_only = [signal("RSI", True, True, 50, window=14)]
+        self.assertFalse(BacktestService.find_sells(self.data, buy_only)["sell"].any())
+        self.assertFalse(BacktestService.find_sells(self.data, [])["sell"].any())
+
+    def test_a_strategy_with_no_sell_signal_buys_and_holds(self):
+        buy_only = [signal("RSI", True, True, 50, window=14)]
+        data = self.data.assign(close=[10.0, 11.0, 12.0, 13.0])
+        data = BacktestService.find_sells(BacktestService.find_buys(data, buy_only), buy_only)
+        out = BacktestService.calculate_returns(data)
+        self.assertEqual(list(out["owned"]), [0, 0, 1, 1])
+        self.assertAlmostEqual(out["return"].iloc[-1], 10.0 * (13.0 / 12.0), places=6)  # held through the last candle
 
     def test_target_is_a_strict_comparison(self):
         out = BacktestService.find_buys(self.data, [signal("RSI", True, True, 60, window=14)])

@@ -101,7 +101,10 @@ class BacktestService:
     @staticmethod
     def find_sells(data: pd.DataFrame, signals: List[Signal]) -> pd.DataFrame:
         new_data = data.copy()
-        new_data["sell"] = True
+        sell_signals = [signal for signal in signals if not signal.buy_signal]
+        # With no sell signals a strategy never sells (it holds once bought); it must not sell on every row,
+        # because a row that is both a buy and a sell counts as neither and the strategy could never buy.
+        new_data["sell"] = bool(sell_signals)
         for signal in signals:
             if not signal.buy_signal:
                 indicator_column = BacktestService.indicator_column(signal)
