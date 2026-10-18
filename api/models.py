@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, transaction
 from django.conf import settings
 from django.contrib.auth.models import BaseUserManager, AbstractBaseUser, PermissionsMixin, Permission, Group
 from django.utils.translation import gettext_lazy as _
@@ -232,9 +232,22 @@ class Strategy(models.Model):
         logger.info("Finished processing data")
 
     def send_notifications(self, message):
-        user: "CustomUser" = self.user
-        for device_id in user.device_ids:
-            NotificationService.send_push_message(device_id, message)
+        """Push `message` to the user's devices once the surrounding transaction commits.
+
+        Sending straight away would hold the strategy's row lock during network calls, and a later failure
+        would roll back the trade while the push had already gone out (a retry would then notify twice). If the
+        transaction rolls back, nothing is sent. A failure for one device does not stop the others.
+        """
+        device_ids = list(self.user.device_ids)
+        transaction.on_commit(lambda: self._push_to_devices(device_ids, message))
+
+    @staticmethod
+    def _push_to_devices(device_ids, message):
+        for device_id in device_ids:
+            try:
+                NotificationService.send_push_message(device_id, message)
+            except Exception:
+                logger.exception("Push notification failed")
 
     def charge_user(self, amount):
         self.charge_user_date = timezone.now() + timedelta(days=30)

@@ -38,13 +38,18 @@ class LivePipelineCase(TestCase):
 
         self.user = make_user(device_ids=["ExponentPushToken[a]"])
 
+    def run_job(self, *args):
+        """Runs a job like a worker: pushes are sent when its transaction commits."""
+        with self.captureOnCommitCallbacks(execute=True):
+            process_strategy_task(*args)
+
     def store(self, closes, first_timestamp=0):
         """Feeds closes through store_close_price in the order the websocket worker would (oldest first),
         then runs any jobs it enqueued."""
         for i, close in enumerate(closes):
             async_to_sync(RedisManager.store_close_price)(SYMBOL, INTERVAL, close, first_timestamp + i * DAY)
         while self.queued:
-            process_strategy_task(*self.queued.pop(0))
+            self.run_job(*self.queued.pop(0))
 
 
 class LivePipelineTests(LivePipelineCase):
@@ -116,8 +121,8 @@ class IdempotentJobTests(LivePipelineCase):
         strategy = self.history_then_subscribe([10.5, 11.5], position=1)
         job = self.queue_candle(12.5, 2)
 
-        process_strategy_task(*job)
-        process_strategy_task(*job)
+        self.run_job(*job)
+        self.run_job(*job)
 
         strategy.refresh_from_db()
         self.assertEqual(strategy.position, 3)
@@ -131,8 +136,8 @@ class IdempotentJobTests(LivePipelineCase):
         older = self.queue_candle(12.5, 2)
         newer = self.queue_candle(13.5, 3)
 
-        process_strategy_task(*newer)
-        process_strategy_task(*older)
+        self.run_job(*newer)
+        self.run_job(*older)
 
         strategy.refresh_from_db()
         self.assertEqual(strategy.last_processed_ts, 3 * DAY)
@@ -145,7 +150,7 @@ class IdempotentJobTests(LivePipelineCase):
         older = self.queue_candle(12.5, 2)
         self.queue_candle(9.5, 3)  # arrives before the older job runs; must not leak into it
 
-        process_strategy_task(*older)
+        self.run_job(*older)
 
         strategy.refresh_from_db()
         self.assertEqual(strategy.position, 3)
@@ -156,8 +161,8 @@ class IdempotentJobTests(LivePipelineCase):
         first = self.queue_candle(12.5, 2)
         second = self.queue_candle(13.5, 3)
 
-        process_strategy_task(*first)
-        process_strategy_task(*second)
+        self.run_job(*first)
+        self.run_job(*second)
 
         strategy.refresh_from_db()
         self.assertEqual(strategy.last_processed_ts, 3 * DAY)
@@ -169,7 +174,7 @@ class IdempotentJobTests(LivePipelineCase):
         strategy = self.history_then_subscribe([10.0, 11.0], position=1)
         job = self.queue_candle(12.0, 2)
 
-        process_strategy_task(*job)
+        self.run_job(*job)
 
         strategy.refresh_from_db()
         self.assertEqual(strategy.position, 3)
@@ -180,7 +185,7 @@ class IdempotentJobTests(LivePipelineCase):
         job = self.queue_candle(12.5, 2)
         strategy.delete()
 
-        process_strategy_task(*job)
+        self.run_job(*job)
 
         self.assertEqual(Strategy.objects.count(), 0)
         self.push.assert_not_called()
@@ -189,7 +194,7 @@ class IdempotentJobTests(LivePipelineCase):
         strategy = make_strategy(self.user, position=1)
         job = self.queue_candle(10.5, 0)
 
-        process_strategy_task(*job)
+        self.run_job(*job)
 
         strategy.refresh_from_db()
         self.assertEqual(strategy.position, 1)
@@ -208,7 +213,7 @@ class LiveHighLowIndicatorTests(LivePipelineCase):
         for j, price in enumerate(prices):
             async_to_sync(RedisManager.record_tick)(SYMBOL, INTERVAL, price, day * DAY + j * 60, DAY)
         while self.queued:
-            process_strategy_task(*self.queued.pop(0))
+            self.run_job(*self.queued.pop(0))
 
     def subscribe(self, name, buy_above, sell_below):
         """A strategy that buys when the indicator is above `buy_above` and sells when it is below `sell_below`."""

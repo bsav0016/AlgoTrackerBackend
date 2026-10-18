@@ -2,6 +2,7 @@ from datetime import timedelta
 from unittest import mock
 
 import pandas as pd
+from django.db import transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -38,9 +39,14 @@ class CheckSignalsTests(TestCase):
         self.push = patcher.start()
         self.addCleanup(patcher.stop)
 
+    def check(self, strategy, prices, ts=None):
+        """check_signals as a job runs it: pushes are sent when the transaction commits."""
+        with self.captureOnCommitCallbacks(execute=True):
+            strategy.check_signals(prices, ts=ts)
+
     def test_buy_signal_records_a_trade_and_notifies_every_device(self):
         strategy = make_strategy(self.user, position=1)
-        strategy.check_signals(RISING)
+        self.check(strategy, RISING)
 
         strategy.refresh_from_db()
         self.assertEqual(strategy.position, 3)
@@ -53,7 +59,7 @@ class CheckSignalsTests(TestCase):
 
     def test_sell_signal_while_holding_records_a_sell_and_notifies(self):
         strategy = make_strategy(self.user, position=2)
-        strategy.check_signals(FALLING)
+        self.check(strategy, FALLING)
 
         strategy.refresh_from_db()
         self.assertEqual(strategy.position, 0)
@@ -62,7 +68,7 @@ class CheckSignalsTests(TestCase):
 
     def test_sell_signal_without_a_position_does_nothing(self):
         strategy = make_strategy(self.user, position=1)
-        strategy.check_signals(FALLING)
+        self.check(strategy, FALLING)
 
         strategy.refresh_from_db()
         self.assertEqual(strategy.position, 1)
@@ -71,7 +77,7 @@ class CheckSignalsTests(TestCase):
 
     def test_buy_signal_while_already_holding_does_not_buy_again(self):
         strategy = make_strategy(self.user, position=2)
-        strategy.check_signals(RISING)
+        self.check(strategy, RISING)
 
         strategy.refresh_from_db()
         self.assertEqual(strategy.position, 2)
@@ -80,7 +86,7 @@ class CheckSignalsTests(TestCase):
 
     def test_a_fresh_buy_settles_to_held_on_the_next_check(self):
         strategy = make_strategy(self.user, position=3)
-        strategy.check_signals(RISING)
+        self.check(strategy, RISING)
         strategy.refresh_from_db()
         self.assertEqual(strategy.position, 2)
         self.push.assert_not_called()
@@ -89,13 +95,13 @@ class CheckSignalsTests(TestCase):
         self.user.device_ids = []
         self.user.save()
         strategy = make_strategy(self.user, position=1)
-        strategy.check_signals(RISING)
+        self.check(strategy, RISING)
         self.push.assert_not_called()
         self.assertEqual(Trade.objects.count(), 1)
 
     def test_held_position_tracks_the_asset_in_both_returns(self):
         strategy = make_strategy(self.user, position=2)
-        strategy.check_signals(RISING)  # 11 -> 12
+        self.check(strategy, RISING)  # 11 -> 12
 
         strategy.refresh_from_db()
         self.assertAlmostEqual(float(strategy.strategy_return), 12 / 11, places=4)
@@ -103,7 +109,7 @@ class CheckSignalsTests(TestCase):
 
     def test_strategy_return_is_unchanged_while_not_holding(self):
         strategy = make_strategy(self.user, position=1)
-        strategy.check_signals(FALLING)  # 11 -> 10
+        self.check(strategy, FALLING)  # 11 -> 10
 
         strategy.refresh_from_db()
         self.assertEqual(float(strategy.strategy_return), 1.0)
@@ -112,16 +118,42 @@ class CheckSignalsTests(TestCase):
     def test_subscription_is_charged_once_the_billing_date_has_passed(self):
         strategy = make_strategy(self.user, position=1,
                                  charge_user_date=timezone.now() - timedelta(minutes=1))
-        strategy.check_signals(FALLING)
+        self.check(strategy, FALLING)
 
         strategy.refresh_from_db()
         self.user.refresh_from_db()
         self.assertEqual(self.user.monthly_credits, 500 - 10)  # the 1day interval costs 10 a month
         self.assertGreater(strategy.charge_user_date, timezone.now() + timedelta(days=29))
 
+    def test_pushes_wait_for_the_transaction_to_commit(self):
+        strategy = make_strategy(self.user, position=1)
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            strategy.check_signals(RISING)
+            self.push.assert_not_called()  # the trade is not committed yet
+        self.assertEqual(len(callbacks), 1)
+        callbacks[0]()
+        self.assertEqual(self.push.call_count, 2)
+
+    def test_no_push_goes_out_when_the_transaction_rolls_back(self):
+        strategy = make_strategy(self.user, position=1)
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            with self.assertRaises(RuntimeError), transaction.atomic():
+                with mock.patch.object(Trade, "save", side_effect=RuntimeError("db down")):
+                    strategy.check_signals(RISING)
+        self.assertEqual(callbacks, [])
+        self.push.assert_not_called()
+
+    def test_a_failing_device_does_not_stop_the_others(self):
+        strategy = make_strategy(self.user, position=1)
+        self.push.side_effect = [RuntimeError("bad token"), None]
+        self.check(strategy, RISING)  # must not raise
+        self.assertEqual(self.push.call_count, 2)
+        strategy.refresh_from_db()
+        self.assertEqual(strategy.position, 3)
+
     def test_a_single_candle_is_skipped_instead_of_crashing(self):
         strategy = make_strategy(self.user, position=1)
-        strategy.check_signals(pd.DataFrame({"close": [10.5]}), ts=0)
+        self.check(strategy, pd.DataFrame({"close": [10.5]}), ts=0)
 
         strategy.refresh_from_db()
         self.assertEqual(strategy.position, 1)
@@ -130,7 +162,7 @@ class CheckSignalsTests(TestCase):
 
     def test_the_candle_timestamp_is_recorded(self):
         strategy = make_strategy(self.user, position=1)
-        strategy.check_signals(RISING, ts=1234)
+        self.check(strategy, RISING, ts=1234)
 
         strategy.refresh_from_db()
         self.assertEqual(strategy.last_processed_ts, 1234)
@@ -138,7 +170,7 @@ class CheckSignalsTests(TestCase):
     def test_a_strategy_deleted_for_non_payment_is_not_saved_back(self):
         CustomUser.objects.filter(pk=self.user.pk).update(monthly_credits=0, account_credits=0)
         strategy = make_strategy(self.user, position=1, charge_user_date=timezone.now() - timedelta(minutes=1))
-        strategy.check_signals(FALLING, ts=1)
+        self.check(strategy, FALLING, ts=1)
 
         self.assertEqual(Strategy.objects.count(), 0)
 
