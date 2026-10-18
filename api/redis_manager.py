@@ -6,7 +6,10 @@ from api.tasks import process_strategy_task
 import requests
 from datetime import datetime, timezone
 import asyncio
+import logging
 from django_redis import get_redis_connection
+
+logger = logging.getLogger(__name__)
 
 
 redis_client = get_redis_connection("default")
@@ -36,24 +39,23 @@ class RedisManager:
                     new_unread_pairs.append([symbol, interval])  # Skip remaining if credits are used
                 else:
                     try:
-                        print("Ran one")
                         await RedisManager.populate_redis_symbol(symbol, interval, end_date)
                     except CreditsUsedError:
                         credits_used = True
                         new_unread_pairs.append([symbol, interval])  # Retry later
                     except Exception as e:
                         new_unread_pairs.append([symbol, interval])
-                        print(f"Error: {e} for {[symbol, interval]}")
+                        logger.warning("Redis load failed for %s %s: %s", symbol, interval, e)
 
             unread_pairs = new_unread_pairs
 
             if unread_pairs:
                 new_time = datetime.now(tz=timezone.utc)
                 wait_time = max(0., 60 - (new_time - end_date).total_seconds())  # Prevent negative wait time
-                print(f"Waiting {wait_time:.2f} seconds before retrying...")
+                logger.info("Waiting %.2f seconds before retrying", wait_time)
                 await asyncio.sleep(wait_time)
 
-        print("Finished loading redis")
+        logger.info("Finished loading redis")
 
     @staticmethod
     async def populate_redis_symbol(symbol: str, interval: str, end_date: datetime):

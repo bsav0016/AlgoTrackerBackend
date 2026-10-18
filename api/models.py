@@ -97,7 +97,6 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     def add_funds(self, amount):
         if amount > 0:
             credit_amount = int(amount)
-            print(type(self.account_credits))
             self.account_credits += credit_amount
             self.save(update_fields=["account_credits"])
 
