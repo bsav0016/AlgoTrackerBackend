@@ -12,7 +12,9 @@ from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, Bl
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from api.serializers import (UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
                              BacktestRequestSerializer, StrategyRequestSerializer)
-from api.models import Strategy, CustomUser, PaymentIntent, RevenueCatCustomer, RevenueCatConfirmation
+from api import credits
+from api.models import (Strategy, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
+                        RevenueCatConfirmation)
 from api.services.auth_service import AuthService
 from api.services.backtest_service import BacktestService
 from api.indicators.signal import Signal
@@ -72,7 +74,9 @@ class UserRegistrationView(APIView):
 
             if promo_code in list(PROMO_CODES.keys()):
                 promo_code_value = int(PROMO_CODES[promo_code])
-                user.add_funds(promo_code_value)
+                credits.apply(user.pk, {"account": promo_code_value}, f"promo:{user.pk}", "promo",
+                              meta={"code": promo_code})
+                user.refresh_from_db()
 
             user_data = CustomUserSerializer(user).data
             return Response({
@@ -512,20 +516,28 @@ class StripePaymentConfirmationView(APIView):
             payment_intent = event['data']['object']
             payment_intent_id = payment_intent['id']
 
+            key = f"stripe:{payment_intent_id}"
             try:
                 saved_payment_intent = PaymentIntent.objects.get(payment_intent_id=payment_intent_id)
-                user = saved_payment_intent.user
-                amount = saved_payment_intent.amount
-
-                user.add_funds(amount)
-                user.save()
-                saved_payment_intent.delete()
-
-                return Response({"message": "Payment successful, funds added."}, status=status.HTTP_200_OK)
             except ObjectDoesNotExist:
+                # Stripe redelivers events. If this payment was already credited the ledger knows it.
+                if CreditTransaction.objects.filter(idempotency_key=key).exists():
+                    return Response({"message": "Payment already credited."}, status=status.HTTP_200_OK)
                 return Response({"detail": "PaymentIntent not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            credits.apply(saved_payment_intent.user_id, {"account": int(saved_payment_intent.amount)}, key,
+                          "purchase", meta={"source": "stripe", "payment_intent": payment_intent_id})
+            saved_payment_intent.delete()
+            return Response({"message": "Payment successful, funds added."}, status=status.HTTP_200_OK)
         else:
             return Response({"message": "Other event type"}, status=status.HTTP_200_OK)
+
+
+def credit_revenuecat_purchase(user_id, confirmation):
+    """Credit one store purchase. The key is the store transaction id, so a redelivery is a no-op."""
+    return credits.apply(
+        user_id, {"account": confirmation.transaction_credits}, f"revenuecat:{confirmation.transaction_id}",
+        "purchase", meta={"source": "revenuecat", "customer_id": confirmation.customer_id})
 
 
 class RevenueCatCustomerView(APIView):
@@ -537,10 +549,16 @@ class RevenueCatCustomerView(APIView):
         data = request.data
         customer_id = data.get("customer_id")
 
-        customer = RevenueCatCustomer.objects.get_or_create(
+        if not customer_id:
+            return Response({"detail": "Missing customer_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+        customer, _ = RevenueCatCustomer.objects.get_or_create(
             customer_id=customer_id,
             defaults={'user': user}
         )
+        if customer.user_id != user.pk:
+            return Response({"detail": "This customer is registered to another account"},
+                            status=status.HTTP_409_CONFLICT)
 
         confirmations = RevenueCatConfirmation.objects.filter(customer_id=customer_id)
         if not confirmations.exists():
@@ -548,9 +566,9 @@ class RevenueCatCustomerView(APIView):
 
         try:
             with transaction.atomic():
-                total_credits = sum(c.transaction_credits for c in confirmations)
-                user.add_funds(total_credits)
-                confirmations.delete()
+                for confirmation in list(confirmations):
+                    credit_revenuecat_purchase(user.pk, confirmation)
+                    confirmation.delete()
             return Response({"message": "Transaction completed successfully"}, status=status.HTTP_200_OK)
 
         except Exception as e:
@@ -613,23 +631,23 @@ class RevenueCatConfirmationView(APIView):
             return Response({"detail": "Did not recognize product ID"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            confirmation, created = RevenueCatConfirmation.objects.get_or_create(
-                transaction_id=transaction_id,
-                defaults={
-                    'transaction_credits': transaction_credits,
-                    'customer_id': customer_id
-                }
-            )
-
             try:
                 customer = RevenueCatCustomer.objects.get(customer_id=customer_id)
-                with transaction.atomic():
-                    customer.user.add_funds(confirmation.transaction_credits)
-                    confirmation.delete()
-                return Response({"message": "Deposit completed successfully"}, status=status.HTTP_200_OK)
-
             except ObjectDoesNotExist:
+                # The app has not registered this store customer yet: park the purchase until it does.
+                RevenueCatConfirmation.objects.get_or_create(
+                    transaction_id=transaction_id,
+                    defaults={'transaction_credits': transaction_credits, 'customer_id': customer_id}
+                )
                 return Response({"message": "Confirmation created but not completed"}, status=status.HTTP_200_OK)
+
+            with transaction.atomic():
+                confirmation = RevenueCatConfirmation(
+                    transaction_id=transaction_id, transaction_credits=transaction_credits,
+                    customer_id=customer_id)
+                credit_revenuecat_purchase(customer.user_id, confirmation)
+                RevenueCatConfirmation.objects.filter(transaction_id=transaction_id).delete()
+            return Response({"message": "Deposit completed successfully"}, status=status.HTTP_200_OK)
 
         except Exception as e:
             logger.exception("Failed to process RevenueCat confirmation")

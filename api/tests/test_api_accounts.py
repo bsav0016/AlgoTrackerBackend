@@ -7,7 +7,7 @@ from django.core import mail
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from api.models import CustomUser, Strategy
+from api.models import CreditTransaction, CustomUser, Strategy
 from api.tests.helpers import FakeRedis
 from api.views import MAX_OTP_ATTEMPTS
 
@@ -38,6 +38,9 @@ class RegistrationTests(APITestCase):
         response = self.client.post(self.url, {**REGISTER, "promo_code": "WELCOME"}, format="json")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(CustomUser.objects.get(username="alice").account_credits, 50)
+        self.assertEqual(response.data["account_credits"], 50)
+        row = CreditTransaction.objects.get()
+        self.assertEqual((row.kind, row.amount, row.bucket, row.meta), ("promo", 50, "account", {"code": "WELCOME"}))
 
     def test_unknown_promo_code_is_rejected_and_no_user_is_created(self):
         response = self.client.post(self.url, {**REGISTER, "promo_code": "NOPE"}, format="json")
