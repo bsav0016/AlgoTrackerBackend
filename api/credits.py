@@ -13,6 +13,8 @@ from django.utils import timezone
 
 from api.models import CreditTransaction, CustomUser
 
+CREDITS_PER_DOLLAR = 100  # the same rate as the RevenueCat products ($10 = 1000 credits, $100 = 10000)
+
 ACCOUNT = CreditTransaction.ACCOUNT
 MONTHLY = CreditTransaction.MONTHLY
 _FIELDS = {ACCOUNT: "account_credits", MONTHLY: "monthly_credits"}
@@ -94,6 +96,11 @@ def _require_same_user(earlier, user_id, key):
     # and silently treating it as a replay would hide a missing credit.
     if earlier.user_id != user_id:
         raise ValueError(f"Idempotency key {key!r} was already used for another user")
+
+
+def credits_for_cents(cents):
+    """Credits bought by a payment of `cents` US cents, so one cent is one credit at the current rate."""
+    return int(cents) * CREDITS_PER_DOLLAR // 100
 
 
 def split_spend(monthly_balance, account_balance, amount):

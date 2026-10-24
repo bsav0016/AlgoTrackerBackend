@@ -50,7 +50,7 @@ class StripePaymentIntentTests(APITestCase):
                                          "customer": "cus_1"})
         self.mocks["intent"].assert_called_once_with(amount=500, currency="usd", customer="cus_1")
         saved = PaymentIntent.objects.get()
-        self.assertEqual((saved.user, saved.payment_intent_id, saved.amount), (self.user, "pi_1", 5))
+        self.assertEqual((saved.user, saved.payment_intent_id, saved.amount_cents), (self.user, "pi_1", 500))
         self.assertEqual(credits_of(self.user), 0)  # credits only arrive via the confirmed webhook
 
     def test_amounts_below_the_minimum_or_malformed_are_rejected_without_calling_stripe(self):
@@ -90,7 +90,7 @@ class StripeWebhookTests(APITestCase):
 
     def setUp(self):
         self.user = make_user()
-        PaymentIntent.objects.create(user=self.user, payment_intent_id="pi_1", amount=5)
+        PaymentIntent.objects.create(user=self.user, payment_intent_id="pi_1", amount_cents=500)
 
     def post(self, body, headers):
         return self.client.post(self.url, body, content_type="application/json", **headers)
@@ -98,17 +98,29 @@ class StripeWebhookTests(APITestCase):
     def test_successful_payment_credits_the_user_once(self):
         body, headers = signed_webhook(succeeded_event("pi_1"))
         self.assertEqual(self.post(body, headers).status_code, status.HTTP_200_OK)
-        self.assertEqual(credits_of(self.user), 5)
+        self.assertEqual(credits_of(self.user), 500)  # $5.00 at 100 credits a dollar
         self.assertFalse(PaymentIntent.objects.exists())
 
         row = ledger().get()
         self.assertEqual((row.idempotency_key, row.kind, row.amount, row.bucket),
-                         ("stripe:pi_1", "purchase", 5, "account"))
+                         ("stripe:pi_1", "purchase", 500, "account"))
+        self.assertEqual(row.meta["cents"], 500)
 
         # Stripe retries deliveries: the same event again must not credit twice, and is acknowledged.
         self.assertEqual(self.post(body, headers).status_code, status.HTTP_200_OK)
-        self.assertEqual(credits_of(self.user), 5)
+        self.assertEqual(credits_of(self.user), 500)
         self.assertEqual(ledger().count(), 1)
+
+    def test_an_amount_that_is_not_whole_dollars_is_credited_in_full(self):
+        PaymentIntent.objects.create(user=self.user, payment_intent_id="pi_odd", amount_cents=350)
+        body, headers = signed_webhook(succeeded_event("pi_odd"))
+        self.assertEqual(self.post(body, headers).status_code, status.HTTP_200_OK)
+        self.assertEqual(credits_of(self.user), 350)  # $3.50, not 3
+
+    def test_the_rate_matches_the_revenuecat_products(self):
+        from api.credits import credits_for_cents
+        self.assertEqual(credits_for_cents(1000), 1000)    # $10 -> 1000, like 10AlgoTrackerDeposit
+        self.assertEqual(credits_for_cents(10000), 10000)  # $100 -> 10000, like 100AlgoTrackerDeposit
 
     def test_a_payment_intent_that_was_never_created_is_still_404(self):
         body, headers = signed_webhook(succeeded_event("pi_other"))

@@ -530,11 +530,10 @@ class StripePaymentView(APIView):
                 customer=customer['id']
             )
 
-            dollar_amount = amount / 100.0
             saved_payment_intent = PaymentIntent(
                 user=request.user,
                 payment_intent_id=payment_intent.id,
-                amount=dollar_amount
+                amount_cents=amount
             )
             saved_payment_intent.save()
 
@@ -582,8 +581,10 @@ class StripePaymentConfirmationView(APIView):
                     return Response({"message": "Payment already credited."}, status=status.HTTP_200_OK)
                 return Response({"detail": "PaymentIntent not found."}, status=status.HTTP_404_NOT_FOUND)
 
-            credits.apply(saved_payment_intent.user_id, {"account": int(saved_payment_intent.amount)}, key,
-                          "purchase", meta={"source": "stripe", "payment_intent": payment_intent_id})
+            credits.apply(saved_payment_intent.user_id,
+                          {"account": credits.credits_for_cents(saved_payment_intent.amount_cents)}, key,
+                          "purchase", meta={"source": "stripe", "payment_intent": payment_intent_id,
+                                            "cents": saved_payment_intent.amount_cents})
             saved_payment_intent.delete()
             return Response({"message": "Payment successful, funds added."}, status=status.HTTP_200_OK)
         else:

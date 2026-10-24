@@ -337,7 +337,7 @@ class CreditTransaction(models.Model):
 class PaymentIntent(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="payment_intents")
     payment_intent_id = models.CharField(max_length=255)
-    amount = models.IntegerField(default=0)
+    amount_cents = models.IntegerField(default=0)  # what Stripe will charge, in US cents
 
 
 class RevenueCatCustomer(models.Model):
