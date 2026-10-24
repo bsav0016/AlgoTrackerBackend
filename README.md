@@ -137,6 +137,8 @@ Backtests and subscriptions cost credits, and credits can be bought two ways. Bo
 | **Stripe** | The app asks the API for a payment (`Customer`, ephemeral key and `PaymentIntent`), pays in Stripe's payment sheet, and Stripe calls the API's webhook when the payment succeeds. | The webhook signature is verified with `STRIPE_WEBHOOK_SECRET`. A bad signature is rejected and nothing is credited. |
 | **RevenueCat** (store purchases) | RevenueCat calls the API's confirmation webhook after a store purchase, and the app registers its RevenueCat customer id. | The webhook must carry a shared secret in its `Authorization` header (`REVENUECAT_WEBHOOK_AUTH`). With no secret configured, every request is rejected. |
 
+**Rate:** both paths pay **100 credits per US dollar** (`CREDITS_PER_DOLLAR` in `api/credits.py`). The RevenueCat products are $10 = 1000, $20 = 2000, $50 = 5000 and $100 = 10000 credits, and a Stripe payment of N cents credits N credits, so $3.50 is 350. A backtest costs 3 credits.
+
 Stripe notes for anyone running this themselves:
 
 - Use a **Stripe key that belongs to this app only**, not one shared with other projects. A restricted key is enough: the code creates customers, ephemeral keys and payment intents, so give it only the permissions for those (customers and payment intents write) and check the exact list in Stripe's test mode.
