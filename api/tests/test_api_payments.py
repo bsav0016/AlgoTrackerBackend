@@ -11,6 +11,7 @@ from django.conf import settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from api.tests.helpers import ledger
 from api.models import CreditTransaction, CustomUser, PaymentIntent, RevenueCatConfirmation, RevenueCatCustomer
 
 
@@ -100,19 +101,19 @@ class StripeWebhookTests(APITestCase):
         self.assertEqual(credits_of(self.user), 5)
         self.assertFalse(PaymentIntent.objects.exists())
 
-        row = CreditTransaction.objects.get()
+        row = ledger().get()
         self.assertEqual((row.idempotency_key, row.kind, row.amount, row.bucket),
                          ("stripe:pi_1", "purchase", 5, "account"))
 
         # Stripe retries deliveries: the same event again must not credit twice, and is acknowledged.
         self.assertEqual(self.post(body, headers).status_code, status.HTTP_200_OK)
         self.assertEqual(credits_of(self.user), 5)
-        self.assertEqual(CreditTransaction.objects.count(), 1)
+        self.assertEqual(ledger().count(), 1)
 
     def test_a_payment_intent_that_was_never_created_is_still_404(self):
         body, headers = signed_webhook(succeeded_event("pi_other"))
         self.assertEqual(self.post(body, headers).status_code, status.HTTP_404_NOT_FOUND)
-        self.assertFalse(CreditTransaction.objects.exists())
+        self.assertFalse(ledger().exists())
 
     def test_bad_signature_is_rejected_and_nothing_is_credited(self):
         body, headers = signed_webhook(succeeded_event("pi_1"), secret="whsec_attacker")
@@ -209,7 +210,7 @@ class RevenueCatTests(APITestCase):
             response = self.client.post(self.confirm_url, revenuecat_event(), format="json")
             self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(credits_of(self.user), 1000)
-        row = CreditTransaction.objects.get()
+        row = ledger().get()
         self.assertEqual((row.idempotency_key, row.kind, row.amount), ("revenuecat:tx1", "purchase", 1000))
 
     def test_redelivery_while_the_purchase_is_still_waiting_for_the_customer_keeps_one_pending_row(self):
@@ -217,7 +218,7 @@ class RevenueCatTests(APITestCase):
             self.client.post(self.confirm_url, revenuecat_event(), format="json")
         self.assertEqual(RevenueCatConfirmation.objects.count(), 1)
         self.assertEqual(credits_of(self.user), 0)
-        self.assertFalse(CreditTransaction.objects.exists())
+        self.assertFalse(ledger().exists())
 
     def test_redelivery_after_a_pending_purchase_was_claimed_does_not_credit_again(self):
         self.client.post(self.confirm_url, revenuecat_event(), format="json")
@@ -226,7 +227,7 @@ class RevenueCatTests(APITestCase):
         self.client.post(self.confirm_url, revenuecat_event(), format="json")
         self.register_customer()
         self.assertEqual(credits_of(self.user), 1000)
-        self.assertEqual(CreditTransaction.objects.count(), 1)
+        self.assertEqual(ledger().count(), 1)
         self.assertFalse(RevenueCatConfirmation.objects.exists())
 
     def test_two_purchases_waiting_for_registration_are_each_credited_once(self):
@@ -236,7 +237,7 @@ class RevenueCatTests(APITestCase):
         self.register_customer()
         self.register_customer()
         self.assertEqual(credits_of(self.user), 1500)
-        self.assertEqual(sorted(CreditTransaction.objects.values_list("idempotency_key", flat=True)),
+        self.assertEqual(sorted(ledger().values_list("idempotency_key", flat=True)),
                          ["revenuecat:a", "revenuecat:b"])
 
     def test_a_customer_id_registered_to_another_account_cannot_be_claimed(self):

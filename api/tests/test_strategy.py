@@ -6,6 +6,7 @@ from django.db import transaction
 from django.test import TestCase
 from django.utils import timezone
 
+from api.tests.helpers import ledger
 from api.models import CreditTransaction, CustomUser, Strategy, Trade
 from api.services.notification_service import NotificationService
 
@@ -202,14 +203,14 @@ class StrategyChargeTests(TestCase):
         user.refresh_from_db()
         self.assertEqual((user.monthly_credits, user.account_credits), (50, 40))
         self.assertFalse(Strategy.objects.filter(pk=strategy.pk).exists())
-        self.assertFalse(CreditTransaction.objects.exists())
+        self.assertFalse(ledger().exists())
 
     def test_the_charge_is_recorded_against_the_strategy_and_its_billing_date(self):
         user = make_user(monthly_credits=500, account_credits=0)
         strategy = make_strategy(user)
         due = int(strategy.charge_user_date.timestamp())
         strategy.charge_user(100)
-        row = CreditTransaction.objects.get()
+        row = ledger().get()
         self.assertEqual((row.kind, row.amount, row.idempotency_key),
                          ("subscription", -100, f"subscription:{strategy.pk}:{due}"))
         self.assertGreater(strategy.charge_user_date, timezone.now() + timedelta(days=29))
@@ -223,7 +224,7 @@ class StrategyChargeTests(TestCase):
         strategy.charge_user(100)
         user.refresh_from_db()
         self.assertEqual(user.monthly_credits, 400)
-        self.assertEqual(CreditTransaction.objects.count(), 1)
+        self.assertEqual(ledger().count(), 1)
 
 
 class StrategySignalStorageTests(TestCase):

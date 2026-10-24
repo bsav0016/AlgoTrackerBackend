@@ -13,7 +13,8 @@ from django.test import TransactionTestCase
 from django.utils import timezone
 
 from api import credits
-from api.models import CreditTransaction, CustomUser
+from api.models import CustomUser
+from api.tests.helpers import ledger
 
 
 def run_in_threads(count, work):
@@ -54,7 +55,7 @@ class ConcurrentCreditTests(TransactionTestCase):
         self.assertEqual((len(paid), len(refused)), (5, 3), results)
         user.refresh_from_db()
         self.assertEqual((user.monthly_credits, user.account_credits), (0, 0))
-        self.assertEqual(CreditTransaction.objects.count(), 5)
+        self.assertEqual(ledger().count(), 5)
 
     def test_parallel_deliveries_of_one_event_credit_once(self):
         user = self.make_user()
@@ -64,7 +65,7 @@ class ConcurrentCreditTests(TransactionTestCase):
         self.assertEqual(sum(1 for r in results if not r.replayed), 1)
         user.refresh_from_db()
         self.assertEqual(user.account_credits, 500)
-        self.assertEqual(CreditTransaction.objects.count(), 1)
+        self.assertEqual(ledger().count(), 1)
 
     def test_a_purchase_and_a_charge_at_the_same_time_both_count(self):
         user = self.make_user(monthly=0, account=10)
@@ -87,4 +88,4 @@ class ConcurrentCreditTests(TransactionTestCase):
         self.assertEqual(sum(1 for r in results if r is True), 1, results)
         user.refresh_from_db()
         self.assertEqual(user.monthly_credits, 500)
-        self.assertEqual(CreditTransaction.objects.count(), 1)
+        self.assertEqual(ledger().count(), 1)

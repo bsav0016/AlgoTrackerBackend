@@ -78,3 +78,10 @@ class FakeRedis:
     def lindex(self, key, index):
         items = self.values.get(key, [])
         return items[index] if -len(items) <= index < len(items) else None
+
+
+def ledger():
+    """Ledger rows written by the code under test: everything except the opening-balance rows that every new
+    user starts with."""
+    from api.models import CreditTransaction
+    return CreditTransaction.objects.exclude(idempotency_key__startswith="opening:")
