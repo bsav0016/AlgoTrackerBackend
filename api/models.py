@@ -94,12 +94,6 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
             self.save(update_fields=["monthly_credits", "reset_monthly_credits"])
             self.refresh_from_db(fields=["monthly_credits"])  # replace the F() expression with the stored value
 
-    def add_funds(self, amount):
-        if amount > 0:
-            credit_amount = int(amount)
-            self.account_credits += credit_amount
-            self.save(update_fields=["account_credits"])
-
     def __str__(self):
         return self.username
 

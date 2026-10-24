@@ -120,7 +120,7 @@ Production runs the same compose file on a single DigitalOcean droplet; deploys 
 
 ## Payments
 
-Backtests and subscriptions cost credits, and credits can be bought two ways. Both end in the same balance (`add_funds` on the user).
+Backtests and subscriptions cost credits, and credits can be bought two ways. Both end in the same balance, and both credit it through the ledger (`api/credits.py`) keyed on the payment, so a repeated webhook cannot credit twice.
 
 | Path | How it works | How the server trusts it |
 | --- | --- | --- |
