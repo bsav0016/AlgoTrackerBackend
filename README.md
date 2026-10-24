@@ -23,7 +23,7 @@ Back-testing a strategy and watching live prices around the clock are too heavy 
 - **Live signals** – a separate worker keeps a websocket open to the TwelveData price feed; price ticks are folded into open/high/low/close candles per interval, and each finished candle is handed to an RQ job that checks each subscribed strategy and updates its position. The job locks the strategy and records the last candle it handled, so a repeated or out-of-order job does not trade or notify twice. Pushes are sent after the job's transaction commits, so a rolled-back trade never notifies
 - **Push notifications** – sent to a user's device through Expo's push service when a strategy changes position, plus Firebase for Android
 - **Credits and payments** – backtests and monthly subscriptions are charged in credits; credits are bought with Stripe payment intents or through RevenueCat (store purchases)
-- **Credit ledger** – every balance change is meant to go through `api/credits.py`, which writes a `CreditTransaction` row per change and refuses to apply the same event key twice. The two balance columns on the user are a cached total. The payment and charge code is being moved onto it in stages (see the tracking issue)
+- **Credit ledger** – every balance change goes through `api/credits.py`, which locks the user row, writes a `CreditTransaction` row per change and refuses to apply the same event key twice. The two balance columns on the user are a cached total. Purchases and promo codes are keyed on the payment, a backtest reserves the cost of one data request before fetching and settles or refunds afterwards, a strategy subscription is keyed on its billing date, and unused monthly credits expire at each reset while purchased credits carry over
 
 ## Stack
 
@@ -89,6 +89,8 @@ python manage.py test
 ```
 
 `manage.py test` automatically uses `algo_tracker_backend.test_settings`: fake API keys, in-memory SQLite, an unreachable Redis, and a guard that fails any test that tries to open a non-local network connection. It ignores your `.env`, needs no services or secrets, and never contacts TwelveData, Stripe or Expo; those are mocked. Run one module with `python manage.py test api.tests.test_backtest_service`.
+
+The credit concurrency tests (`api/tests/test_credits_concurrency.py`) need row locks, so they are skipped on SQLite. To run them, start a Postgres (`docker run --rm -p 5433:5432 -e POSTGRES_PASSWORD=pw postgres:16`) and set `TEST_DATABASE_URL=postgres://postgres:pw@127.0.0.1:5433/postgres`; CI does this with a service container.
 
 The suite covers the indicators, backtest math, live signal handling (including candle building from ticks, running a job twice or out of order, replaying one price series through the live path and the backtest to check they agree, and the path from a stored candle through the Redis candle list and the queued job to a buy or sell, run against an in-memory Redis) and billing, and the account (including the password-reset flow, that reset codes are never logged, and the wrong-guess limit), backtest, strategy and payment APIs.
 

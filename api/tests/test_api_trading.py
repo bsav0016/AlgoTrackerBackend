@@ -5,7 +5,8 @@ from unittest import mock
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from api.models import CustomUser, Strategy
+from api.models import CreditTransaction, CustomUser, Strategy
+from api.services.backtest_service import BacktestService
 from api.tests.helpers import FakeResponse, twelve_data_values
 
 CLOSES = [10, 11, 12, 13, 12, 11, 10, 11, 12]
@@ -61,6 +62,55 @@ class BacktestEndpointTests(APITestCase):
         self.assertTrue(data["image"] and data["image_no_signals"])
         self.assertEqual(self.credits(), (500 - 3, 0))  # BACKTEST_BASE_COST x one data request
         self.assertEqual(data["user_monthly_credits"], 497)
+
+    def test_the_cost_is_reserved_in_the_ledger(self):
+        self.client.post(self.url, backtest_payload(), format="json")
+        row = CreditTransaction.objects.get()
+        self.assertEqual((row.kind, row.bucket, row.amount), ("backtest", "monthly", -3))
+        self.assertTrue(row.idempotency_key.endswith(":reserve"))
+        self.assertEqual(row.meta, {"symbol": "AAPL", "interval": "1day"})
+
+    def run_with_attempts(self, attempts):
+        real = BacktestService.conduct_backtest
+
+        def conduct(*args, **kwargs):
+            result, _ = real(*args, **kwargs)
+            return result, attempts
+
+        with mock.patch("api.views.BacktestService.conduct_backtest", side_effect=conduct):
+            return self.client.post(self.url, backtest_payload(), format="json")
+
+    def test_extra_data_requests_are_settled_after_the_run(self):
+        response = self.run_with_attempts(3)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self.credits(), (500 - 9, 0))  # 3 x BACKTEST_BASE_COST
+        self.assertEqual(sorted(k.rsplit(":", 1)[1] for k in
+                                CreditTransaction.objects.values_list("idempotency_key", flat=True)),
+                         ["reserve", "settle"])
+        self.assertEqual(response.data["user_monthly_credits"], 491)
+
+    def test_when_the_extra_requests_cannot_be_paid_the_reservation_is_given_back(self):
+        self.set_credits(4, 0)  # enough for the first request (3), not for two more (6)
+        response = self.run_with_attempts(3)
+        self.assertEqual(response.status_code, status.HTTP_402_PAYMENT_REQUIRED)
+        self.assertEqual(response.data, {"detail": "Requires $9"})
+        self.assertEqual(self.credits(), (4, 0))
+
+    def test_a_failed_run_gives_the_reservation_back_in_the_same_buckets(self):
+        self.set_credits(1, 10)
+        self.get.return_value = FakeResponse(503, text="service unavailable")
+        response = self.client.post(self.url, backtest_payload(), format="json")
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(self.credits(), (1, 10))
+        suffixes = sorted(k.split(":", 2)[2] for k in
+                          CreditTransaction.objects.values_list("idempotency_key", flat=True))
+        self.assertEqual(suffixes, ["reserve", "reserve", "reserve:refund", "reserve:refund"])
+
+    def test_nothing_is_fetched_from_the_market_data_api_when_the_user_cannot_pay(self):
+        self.set_credits(1, 1)
+        self.client.post(self.url, backtest_payload(), format="json")
+        self.get.assert_not_called()
+        self.assertFalse(CreditTransaction.objects.exists())
 
     def test_strategy_that_never_trades_still_returns_a_result(self):
         never = {**BUY_SMA, "above_target": True, "target_value": 100.0}

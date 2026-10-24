@@ -275,18 +275,3 @@ class BacktestService:
         percent_return_adj = percent_return - asset_return
 
         return percent_return * 100, percent_return_adj * 100
-
-    @staticmethod
-    def charge_user(user, amount):
-        funds_diff = user.monthly_credits - int(amount)
-        if funds_diff > 0:
-            user.monthly_credits = funds_diff
-            user.save()
-            return True, user.account_credits, user.monthly_credits
-        elif user.monthly_credits + user.account_credits >= amount:
-            user.monthly_credits = 0
-            user.account_credits += funds_diff
-            user.save()
-            return True, user.account_credits, user.monthly_credits
-        else:
-            return False, None, None

@@ -6,7 +6,7 @@ from django.db import transaction
 from django.test import TestCase
 from django.utils import timezone
 
-from api.models import CustomUser, Strategy, Trade
+from api.models import CreditTransaction, CustomUser, Strategy, Trade
 from api.services.notification_service import NotificationService
 
 RISING = pd.DataFrame({"close": [10.0, 11.0, 12.0]})   # close above its 2-bar average
@@ -195,13 +195,35 @@ class StrategyChargeTests(TestCase):
         user.refresh_from_db()
         self.assertEqual((user.monthly_credits, user.account_credits), (0, 150))
 
-    def test_strategy_is_removed_when_the_user_cannot_pay(self):
+    def test_strategy_is_removed_and_nothing_is_charged_when_the_user_cannot_pay(self):
         user = make_user(monthly_credits=50, account_credits=40)
         strategy = make_strategy(user)
         strategy.charge_user(100)
         user.refresh_from_db()
-        self.assertEqual((user.monthly_credits, user.account_credits), (0, 0))
+        self.assertEqual((user.monthly_credits, user.account_credits), (50, 40))
         self.assertFalse(Strategy.objects.filter(pk=strategy.pk).exists())
+        self.assertFalse(CreditTransaction.objects.exists())
+
+    def test_the_charge_is_recorded_against_the_strategy_and_its_billing_date(self):
+        user = make_user(monthly_credits=500, account_credits=0)
+        strategy = make_strategy(user)
+        due = int(strategy.charge_user_date.timestamp())
+        strategy.charge_user(100)
+        row = CreditTransaction.objects.get()
+        self.assertEqual((row.kind, row.amount, row.idempotency_key),
+                         ("subscription", -100, f"subscription:{strategy.pk}:{due}"))
+        self.assertGreater(strategy.charge_user_date, timezone.now() + timedelta(days=29))
+
+    def test_running_the_same_billing_date_twice_charges_once(self):
+        user = make_user(monthly_credits=500, account_credits=0)
+        strategy = make_strategy(user)
+        due = strategy.charge_user_date
+        strategy.charge_user(100)
+        strategy.charge_user_date = due  # a retried job that never saved the new billing date
+        strategy.charge_user(100)
+        user.refresh_from_db()
+        self.assertEqual(user.monthly_credits, 400)
+        self.assertEqual(CreditTransaction.objects.count(), 1)
 
 
 class StrategySignalStorageTests(TestCase):

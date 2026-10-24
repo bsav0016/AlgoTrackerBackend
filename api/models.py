@@ -2,7 +2,6 @@ from django.db import models, transaction
 from django.conf import settings
 from django.contrib.auth.models import BaseUserManager, AbstractBaseUser, PermissionsMixin, Permission, Group
 from django.utils.translation import gettext_lazy as _
-from django.db.models import F
 from api.indicators.signal import Signal
 from typing import List
 from api.services.signal_service import SignalService
@@ -88,11 +87,9 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
 
     def check_monthly_credits(self):
         """Reset monthly funds if the reset date has passed."""
-        if timezone.now() > self.reset_monthly_credits:
-            self.monthly_credits = F("monthly_credits") + MONTHLY_CREDITS  # Atomic update
-            self.reset_monthly_credits = timezone.now() + timedelta(days=30)
-            self.save(update_fields=["monthly_credits", "reset_monthly_credits"])
-            self.refresh_from_db(fields=["monthly_credits"])  # replace the F() expression with the stored value
+        from api import credits
+        if credits.reset_monthly(self.pk, MONTHLY_CREDITS):
+            self.refresh_from_db(fields=["monthly_credits", "reset_monthly_credits"])
 
     def __str__(self):
         return self.username
@@ -242,21 +239,19 @@ class Strategy(models.Model):
                 logger.exception("Push notification failed")
 
     def charge_user(self, amount):
-        self.charge_user_date = timezone.now() + timedelta(days=30)
-        user: "CustomUser" = self.user
-        funds_diff = user.monthly_credits - int(amount)
-        if funds_diff > 0:
-            user.monthly_credits = funds_diff
-        else:
-            user.monthly_credits = 0
-            user.account_credits += funds_diff
+        """Charge one month of this subscription. If the user cannot pay, the strategy is deleted and nothing is charged.
 
-        if user.account_credits < 0:
-            user.account_credits = 0
+        The ledger key names this strategy and its billing date, so running the same job again does not charge twice.
+        """
+        from api import credits
+        key = f"subscription:{self.pk}:{int(self.charge_user_date.timestamp())}"
+        try:
+            credits.spend(self.user_id, amount, key, "subscription",
+                          meta={"strategy": self.pk, "symbol": self.symbol, "interval": self.interval})
+        except credits.InsufficientCredits:
             self.delete()
-
-        user.save(update_fields=["monthly_credits", "account_credits"])
-
+            return
+        self.charge_user_date = timezone.now() + timedelta(days=30)
 
 
 class StockValue(models.Model):

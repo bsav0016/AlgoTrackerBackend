@@ -120,16 +120,39 @@ class LoginTests(APITestCase):
 
 
 class MonthlyCreditsTests(APITestCase):
-    def test_reset_date_in_the_past_tops_up_monthly_credits_on_user_details(self):
+    def test_reset_date_in_the_past_resets_monthly_credits_and_expires_the_unused_ones(self):
         from datetime import timedelta
         from django.utils import timezone
-        user = make_user(monthly_credits=40, reset_monthly_credits=timezone.now() - timedelta(days=1))
+        user = make_user(monthly_credits=40, account_credits=70,
+                         reset_monthly_credits=timezone.now() - timedelta(days=1))
         self.client.force_authenticate(user)
         response = self.client.get("/api/user-details/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         user.refresh_from_db()
-        self.assertEqual(user.monthly_credits, 540)
+        self.assertEqual((user.monthly_credits, user.account_credits), (500, 70))  # purchased credits carry over
         self.assertGreater(user.reset_monthly_credits, timezone.now() + timedelta(days=29))
+        row = CreditTransaction.objects.get()
+        self.assertEqual((row.kind, row.bucket, row.amount, row.balance_after), ("monthly_grant", "monthly", 460, 500))
+        self.assertEqual(row.meta, {"expired": 40, "granted": 500})
+        self.assertEqual(response.data["monthly_credits"], 500)
+
+    def test_the_reset_happens_once_per_reset_date(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        user = make_user(monthly_credits=40, reset_monthly_credits=timezone.now() - timedelta(days=1))
+        self.client.force_authenticate(user)
+        for _ in range(3):
+            self.client.get("/api/user-details/")
+        self.assertEqual(CreditTransaction.objects.count(), 1)
+
+    def test_monthly_credits_above_the_allowance_also_reset_down_to_it(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        user = make_user(monthly_credits=900, reset_monthly_credits=timezone.now() - timedelta(days=1))
+        self.client.force_authenticate(user)
+        self.client.get("/api/user-details/")
+        user.refresh_from_db()
+        self.assertEqual(user.monthly_credits, 500)
 
     def test_credits_are_not_topped_up_before_the_reset_date(self):
         user = make_user(monthly_credits=40)

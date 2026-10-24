@@ -10,7 +10,8 @@ import os
 os.environ.update({
     "DEBUG": "True",
     "SECRET_KEY": "test-secret-key-not-for-production",
-    "DATABASE_URL": "sqlite://:memory:",
+    # In-memory SQLite unless TEST_DATABASE_URL names a Postgres (CI does, for the row-lock tests).
+    "DATABASE_URL": os.environ.get("TEST_DATABASE_URL", "sqlite://:memory:"),
     # Nothing listens on port 1, so any unmocked Redis call fails loudly.
     "REDIS_URL": "redis://127.0.0.1:1/0",
     "TWELVE_DATA_API_KEY": "test-twelve-data-key",

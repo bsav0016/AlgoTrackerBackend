@@ -178,3 +178,60 @@ class AdminTests(TestCase):
         self.assertFalse(model_admin.has_add_permission(request))
         self.assertFalse(model_admin.has_change_permission(request))
         self.assertFalse(model_admin.has_delete_permission(request))
+
+
+class SpendTests(TestCase):
+    def test_spend_uses_monthly_credits_first_inside_the_lock(self):
+        user = make_user(monthly=2, account=10)
+        result = credits.spend(user.pk, 5, "s1", "backtest")
+        self.assertEqual((result.monthly, result.account), (0, 7))
+        self.assertEqual(sorted(CreditTransaction.objects.values_list("bucket", "amount")),
+                         [("account", -3), ("monthly", -2)])
+
+    def test_spend_that_cannot_be_covered_writes_nothing(self):
+        user = make_user(monthly=1, account=1)
+        with self.assertRaises(credits.InsufficientCredits):
+            credits.spend(user.pk, 3, "s1", "backtest")
+        self.assertEqual(balances(user), (1, 1))
+        self.assertFalse(CreditTransaction.objects.exists())
+
+    def test_spend_twice_with_one_key_charges_once(self):
+        user = make_user(monthly=10, account=0)
+        credits.spend(user.pk, 3, "s1", "backtest")
+        self.assertTrue(credits.spend(user.pk, 3, "s1", "backtest").replayed)
+        self.assertEqual(balances(user), (7, 0))
+
+
+class RefundTests(TestCase):
+    def test_a_refund_puts_each_amount_back_in_its_own_bucket(self):
+        user = make_user(monthly=1, account=10)
+        credits.spend(user.pk, 4, "bt:reserve", "backtest")
+        self.assertEqual(balances(user), (0, 7))
+        result = credits.refund(user.pk, "bt:reserve", "bt:reserve:refund", "backtest")
+        self.assertEqual((result.monthly, result.account), (1, 10))
+        refunds = CreditTransaction.objects.filter(idempotency_key="bt:reserve:refund")
+        self.assertEqual(sorted(refunds.values_list("bucket", "amount")), [("account", 3), ("monthly", 1)])
+        self.assertEqual(refunds.first().meta, {"refund_of": "bt:reserve"})
+
+    def test_refunding_twice_gives_back_once(self):
+        user = make_user(monthly=10, account=0)
+        credits.spend(user.pk, 4, "bt:reserve", "backtest")
+        credits.refund(user.pk, "bt:reserve", "bt:reserve:refund", "backtest")
+        self.assertTrue(credits.refund(user.pk, "bt:reserve", "bt:reserve:refund", "backtest").replayed)
+        self.assertEqual(balances(user), (10, 0))
+
+    def test_refunding_something_that_never_happened_does_nothing(self):
+        user = make_user(monthly=10, account=0)
+        self.assertIsNone(credits.refund(user.pk, "missing", "missing:refund", "backtest"))
+        self.assertEqual(balances(user), (10, 0))
+        self.assertFalse(CreditTransaction.objects.exists())
+
+    def test_the_ledger_still_sums_to_the_balance_after_a_spend_and_a_refund(self):
+        user = make_user(monthly=0, account=0)
+        credits.apply(user.pk, {"account": 20, "monthly": 5}, "buy", "purchase")
+        credits.spend(user.pk, 8, "bt", "backtest")
+        credits.refund(user.pk, "bt", "bt:refund", "backtest")
+        user.refresh_from_db()
+        for bucket, cached in (("account", user.account_credits), ("monthly", user.monthly_credits)):
+            total = sum(CreditTransaction.objects.filter(user=user, bucket=bucket).values_list("amount", flat=True))
+            self.assertEqual(total, cached, bucket)
