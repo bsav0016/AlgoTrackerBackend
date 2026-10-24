@@ -1,4 +1,6 @@
 from django.db import models, transaction
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.conf import settings
 from django.contrib.auth.models import BaseUserManager, AbstractBaseUser, PermissionsMixin, Permission, Group
 from django.utils.translation import gettext_lazy as _
@@ -93,6 +95,14 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.username
+
+
+@receiver(post_save, sender=CustomUser)
+def start_credit_ledger(sender, instance, created, raw=False, **kwargs):
+    """Every new user gets opening ledger rows for the balances they start with (not when loading fixtures)."""
+    if created and not raw:
+        from api import credits
+        credits.record_opening_balance(instance)
 
 
 class Strategy(models.Model):

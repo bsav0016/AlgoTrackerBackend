@@ -120,6 +120,14 @@ Static checks use Ruff (`pip install -r requirements-dev.txt`, then `ruff check 
 
 Production runs the same compose file on a single DigitalOcean droplet; deploys are manual (`git pull`, `docker compose up --build -d`).
 
+## Credits
+
+Every change to a balance is a row in the credit ledger (`CreditTransaction`, written only by `api/credits.py`). The balances on the user are a cached total of it.
+
+- **Reconcile:** `python manage.py check_credits` (in Docker: `docker compose exec web python manage.py check_credits`) checks every user's cached balances against their ledger, prints each mismatch and exits non-zero if there is one. `--user NAME` checks one account. Run it after any manual database change, and on a schedule if you want an alarm.
+- **History:** `GET /api/credits/history/` (signed in) returns the caller's own rows newest first as `{"results": [...], "next_before": id | null}`; pass `?limit=` (1 to 100) and `?before=<next_before>` to page. Each row has `id`, `created_at`, `bucket` (`account` or `monthly`), a signed `amount`, `balance_after`, `kind` and a display `label`.
+- **Never** change `account_credits` or `monthly_credits` directly; use `credits.apply` or `credits.spend`, or `check_credits` will flag it.
+
 ## Payments
 
 Backtests and subscriptions cost credits, and credits can be bought two ways. Both end in the same balance, and both credit it through the ledger (`api/credits.py`) keyed on the payment, so a repeated webhook cannot credit twice.

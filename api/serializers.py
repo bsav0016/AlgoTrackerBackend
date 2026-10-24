@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from django.contrib.auth import authenticate
-from api.models import CustomUser, Strategy, Trade
+from api.models import CreditTransaction, CustomUser, Strategy, Trade
 from django.conf import settings
 import math
 
@@ -106,6 +106,33 @@ class LoginSerializer(serializers.Serializer):
         user_strategies = Strategy.objects.filter(user=user)
         strategy_data = [StrategySerializer(strategy).data for strategy in user_strategies]
         return strategy_data
+
+
+class CreditTransactionSerializer(serializers.ModelSerializer):
+    """One line of a user's credit history. `meta` and the internal event key are not exposed."""
+    label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CreditTransaction
+        fields = ['id', 'created_at', 'bucket', 'amount', 'balance_after', 'kind', 'label']
+        read_only_fields = fields
+
+    def get_label(self, row):
+        meta = row.meta or {}
+        refund = "refund_of" in meta
+        if row.kind == "purchase":
+            return "Credit purchase"
+        if row.kind == "backtest":
+            what = f"Backtest {meta['symbol']} {meta['interval']}".strip() if "symbol" in meta else "Backtest"
+            return f"{what} (refund)" if refund else what
+        if row.kind == "subscription":
+            return f"Strategy subscription {meta['symbol']} {meta['interval']}" if "symbol" in meta \
+                else "Strategy subscription"
+        if row.kind == "monthly_grant":
+            return "Monthly credits reset"
+        if row.kind == "promo":
+            return "Promo code"
+        return "Opening balance" if meta.get("reason") == "opening balance" else "Adjustment"
 
 
 class CustomUserSerializer(serializers.ModelSerializer):

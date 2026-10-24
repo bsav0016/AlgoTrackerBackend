@@ -2,7 +2,7 @@ from django.urls import path
 from api.views import (UserRegistrationView, LoginView, LogoutView, BacktestView, StrategyView, DeviceIDView,
                        AvailableSymbolsAndIntervalsView, PasswordResetRequestView, PasswordResetConfirmView,
                        StripePaymentView,StripePaymentConfirmationView, UserDetailsView, DeleteAccountView,
-                       PromoCodeAvailabilityView, RevenueCatCustomerView, RevenueCatConfirmationView, HealthView)
+                       PromoCodeAvailabilityView, RevenueCatCustomerView, RevenueCatConfirmationView, HealthView, CreditHistoryView)
 from rest_framework_simplejwt.views import TokenRefreshView
 
 
@@ -14,6 +14,7 @@ urlpatterns = [
     path('logout/', LogoutView.as_view(), name='logout'),
     path('delete-account/', DeleteAccountView.as_view(), name='delete-account'),
     path('user-details/', UserDetailsView.as_view(), name='user-details'),
+    path('credits/history/', CreditHistoryView.as_view(), name='credit-history'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
     path('password-reset/', PasswordResetRequestView.as_view(), name='password-reset'),

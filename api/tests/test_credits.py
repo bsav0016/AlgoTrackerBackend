@@ -7,6 +7,7 @@ from django.db import IntegrityError
 from django.test import RequestFactory, TestCase
 
 from api import credits
+from api.tests.helpers import ledger
 from api.models import CreditTransaction, CustomUser
 
 
@@ -32,7 +33,7 @@ class ApplyTests(TestCase):
         result = self.apply({"account": 500}, meta={"product": "FundsDeposit"})
         self.assertEqual((result.account, result.monthly, result.replayed), (520, 10, False))
         self.assertEqual(balances(self.user), (10, 520))
-        row = CreditTransaction.objects.get()
+        row = ledger().get()
         self.assertEqual((row.user, row.bucket, row.amount, row.balance_after, row.kind, row.idempotency_key),
                          (self.user, "account", 500, 520, "purchase", "k1"))
         self.assertEqual(row.meta, {"product": "FundsDeposit"})
@@ -40,7 +41,7 @@ class ApplyTests(TestCase):
     def test_spending_from_two_buckets_writes_one_row_per_bucket_with_the_same_key(self):
         self.apply({"monthly": -10, "account": -4}, key="bt1", kind="backtest")
         self.assertEqual(balances(self.user), (0, 16))
-        rows = {r.bucket: r for r in CreditTransaction.objects.all()}
+        rows = {r.bucket: r for r in ledger().all()}
         self.assertEqual((rows["monthly"].amount, rows["monthly"].balance_after), (-10, 0))
         self.assertEqual((rows["account"].amount, rows["account"].balance_after), (-4, 16))
 
@@ -50,7 +51,7 @@ class ApplyTests(TestCase):
         self.assertTrue(again.replayed)
         self.assertEqual((again.account, again.monthly), (520, 10))
         self.assertEqual(balances(self.user), (10, 520))
-        self.assertEqual(CreditTransaction.objects.count(), 1)
+        self.assertEqual(ledger().count(), 1)
 
     def test_a_replay_with_different_amounts_is_still_ignored(self):
         self.apply({"account": 500})
@@ -73,7 +74,7 @@ class ApplyTests(TestCase):
         with self.assertRaises(credits.InsufficientCredits):
             self.apply({"monthly": -5, "account": -21}, kind="backtest")
         self.assertEqual(balances(self.user), (10, 20))
-        self.assertFalse(CreditTransaction.objects.exists())
+        self.assertFalse(ledger().exists())
 
     def test_a_failed_attempt_does_not_use_up_the_key(self):
         with self.assertRaises(credits.InsufficientCredits):
@@ -85,13 +86,13 @@ class ApplyTests(TestCase):
         self.apply({"account": 100}, key="a")
         self.apply({"account": -30}, key="b", kind="backtest")
         self.apply({"account": 5}, key="c")
-        self.assertEqual(list(CreditTransaction.objects.order_by("id").values_list("balance_after", flat=True)),
+        self.assertEqual(list(ledger().order_by("id").values_list("balance_after", flat=True)),
                          [120, 90, 95])
 
     def test_zero_changes_write_nothing(self):
         result = self.apply({"account": 0})
         self.assertFalse(result.replayed)
-        self.assertFalse(CreditTransaction.objects.exists())
+        self.assertFalse(ledger().exists())
 
     def test_unknown_bucket_and_empty_key_are_rejected(self):
         with self.assertRaises(ValueError):
@@ -114,7 +115,7 @@ class ApplyTests(TestCase):
         with mock.patch.object(CreditTransaction.objects, "filter", side_effect=first_lookup_misses):
             result = self.apply({"account": 5})
         self.assertTrue(result.replayed)
-        self.assertEqual(CreditTransaction.objects.count(), 1)
+        self.assertEqual(ledger().count(), 1)
 
     def test_the_database_refuses_a_duplicate_event_row(self):
         CreditTransaction.objects.create(user=self.user, bucket="account", amount=1, balance_after=1,
@@ -149,6 +150,7 @@ class SplitSpendTests(TestCase):
 
 class OpeningBalanceMigrationTests(TestCase):
     def run_backfill(self):
+        CreditTransaction.objects.all().delete()  # pre-ledger users had no rows; new users get them on creation
         migration = importlib.import_module("api.migrations.0020_credittransaction")
         migration.write_opening_balances(apps, None)
 
@@ -185,7 +187,7 @@ class SpendTests(TestCase):
         user = make_user(monthly=2, account=10)
         result = credits.spend(user.pk, 5, "s1", "backtest")
         self.assertEqual((result.monthly, result.account), (0, 7))
-        self.assertEqual(sorted(CreditTransaction.objects.values_list("bucket", "amount")),
+        self.assertEqual(sorted(ledger().values_list("bucket", "amount")),
                          [("account", -3), ("monthly", -2)])
 
     def test_spend_that_cannot_be_covered_writes_nothing(self):
@@ -193,7 +195,7 @@ class SpendTests(TestCase):
         with self.assertRaises(credits.InsufficientCredits):
             credits.spend(user.pk, 3, "s1", "backtest")
         self.assertEqual(balances(user), (1, 1))
-        self.assertFalse(CreditTransaction.objects.exists())
+        self.assertFalse(ledger().exists())
 
     def test_spend_twice_with_one_key_charges_once(self):
         user = make_user(monthly=10, account=0)
@@ -224,7 +226,7 @@ class RefundTests(TestCase):
         user = make_user(monthly=10, account=0)
         self.assertIsNone(credits.refund(user.pk, "missing", "missing:refund", "backtest"))
         self.assertEqual(balances(user), (10, 0))
-        self.assertFalse(CreditTransaction.objects.exists())
+        self.assertFalse(ledger().exists())
 
     def test_the_ledger_still_sums_to_the_balance_after_a_spend_and_a_refund(self):
         user = make_user(monthly=0, account=0)

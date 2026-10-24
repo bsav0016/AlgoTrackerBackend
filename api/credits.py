@@ -148,3 +148,17 @@ def reset_monthly(user_id, allowance, days=30):
               "monthly_grant", meta={"expired": user.monthly_credits, "granted": allowance})
         CustomUser.objects.filter(pk=user_id).update(reset_monthly_credits=now + timedelta(days=days))
         return True
+
+
+def record_opening_balance(user):
+    """Start a new user's ledger: one row per non-zero starting balance, key `opening:<id>`.
+
+    Without it the ledger would not add up to the balance a user is created with (the monthly allowance, or
+    credits set by hand). The data migration that introduced the ledger uses the same key for existing users.
+    """
+    rows = [
+        CreditTransaction(user=user, bucket=bucket, amount=balance, balance_after=balance, kind="adjustment",
+                          idempotency_key=f"opening:{user.pk}", meta={"reason": "opening balance"})
+        for bucket, balance in ((ACCOUNT, user.account_credits), (MONTHLY, user.monthly_credits)) if balance
+    ]
+    CreditTransaction.objects.bulk_create(rows)

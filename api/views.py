@@ -12,6 +12,7 @@ from django.db import connection, transaction
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from api.serializers import (UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
+                             CreditTransactionSerializer,
                              BacktestRequestSerializer, StrategyRequestSerializer)
 from api import credits
 from api.models import (Strategy, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
@@ -178,6 +179,38 @@ class UserDetailsView(APIView):
         user_data = CustomUserSerializer(user).data
 
         return Response({**user_data}, status=status.HTTP_200_OK)
+
+
+class CreditHistoryView(APIView):
+    """The signed-in user's own credit history, newest first, a page at a time.
+
+    `?limit=` (1 to 100, default 50) sizes the page; pass the previous response's `next_before` as `?before=`
+    to get the next one. `next_before` is null on the last page.
+    """
+    authentication_classes = [JWTAuthentication, ]
+    permission_classes = [IsAuthenticated, ]
+    DEFAULT_LIMIT = 50
+    MAX_LIMIT = 100
+
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get("limit", self.DEFAULT_LIMIT))
+            before = request.query_params.get("before")
+            before = int(before) if before is not None else None
+        except ValueError:
+            return Response({"detail": "limit and before must be whole numbers"}, status=status.HTTP_400_BAD_REQUEST)
+        limit = max(1, min(limit, self.MAX_LIMIT))
+
+        rows = CreditTransaction.objects.filter(user=request.user).order_by("-id")
+        if before is not None:
+            rows = rows.filter(id__lt=before)
+        page = list(rows[:limit + 1])
+        has_more = len(page) > limit
+        page = page[:limit]
+        return Response({
+            "results": CreditTransactionSerializer(page, many=True).data,
+            "next_before": page[-1].id if has_more else None,
+        }, status=status.HTTP_200_OK)
 
 
 class DeviceIDView(APIView):

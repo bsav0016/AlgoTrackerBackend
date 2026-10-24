@@ -7,7 +7,7 @@ from rest_framework.test import APITestCase
 
 from api.models import CreditTransaction, CustomUser, Strategy
 from api.services.backtest_service import BacktestService
-from api.tests.helpers import FakeResponse, twelve_data_values
+from api.tests.helpers import FakeResponse, ledger, twelve_data_values
 
 CLOSES = [10, 11, 12, 13, 12, 11, 10, 11, 12]
 BUY_SMA = {"name": "SMA", "above_target": False, "buy_signal": True, "target_value": 1.0, "window": 2}
@@ -65,7 +65,7 @@ class BacktestEndpointTests(APITestCase):
 
     def test_the_cost_is_reserved_in_the_ledger(self):
         self.client.post(self.url, backtest_payload(), format="json")
-        row = CreditTransaction.objects.get()
+        row = ledger().get()
         self.assertEqual((row.kind, row.bucket, row.amount), ("backtest", "monthly", -3))
         self.assertTrue(row.idempotency_key.endswith(":reserve"))
         self.assertEqual(row.meta, {"symbol": "AAPL", "interval": "1day"})
@@ -85,7 +85,7 @@ class BacktestEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(self.credits(), (500 - 9, 0))  # 3 x BACKTEST_BASE_COST
         self.assertEqual(sorted(k.rsplit(":", 1)[1] for k in
-                                CreditTransaction.objects.values_list("idempotency_key", flat=True)),
+                                ledger().values_list("idempotency_key", flat=True)),
                          ["reserve", "settle"])
         self.assertEqual(response.data["user_monthly_credits"], 491)
 
@@ -103,14 +103,14 @@ class BacktestEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         self.assertEqual(self.credits(), (1, 10))
         suffixes = sorted(k.split(":", 2)[2] for k in
-                          CreditTransaction.objects.values_list("idempotency_key", flat=True))
+                          ledger().values_list("idempotency_key", flat=True))
         self.assertEqual(suffixes, ["reserve", "reserve", "reserve:refund", "reserve:refund"])
 
     def test_nothing_is_fetched_from_the_market_data_api_when_the_user_cannot_pay(self):
         self.set_credits(1, 1)
         self.client.post(self.url, backtest_payload(), format="json")
         self.get.assert_not_called()
-        self.assertFalse(CreditTransaction.objects.exists())
+        self.assertFalse(ledger().exists())
 
     def test_strategy_that_never_trades_still_returns_a_result(self):
         never = {**BUY_SMA, "above_target": True, "target_value": 100.0}
