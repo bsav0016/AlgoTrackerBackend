@@ -161,34 +161,6 @@ class ChartTests(SimpleTestCase):
             BacktestService.generate_backtest_chart(pd.DataFrame())
 
 
-class ChargeUserTests(TestCase):
-    @staticmethod
-    def make_user(monthly, account):
-        return CustomUser.objects.create_user(
-            username="u", email="u@example.com", password="x", first_name="U", last_name="U",
-            monthly_credits=monthly, account_credits=account)
-
-    def test_monthly_credits_are_spent_first(self):
-        user = self.make_user(500, 10)
-        self.assertEqual(BacktestService.charge_user(user, 3), (True, 10, 497))
-        user.refresh_from_db()
-        self.assertEqual((user.monthly_credits, user.account_credits), (497, 10))
-
-    def test_shortfall_is_taken_from_account_credits(self):
-        user = self.make_user(2, 10)
-        self.assertEqual(BacktestService.charge_user(user, 5), (True, 7, 0))
-
-    def test_exactly_the_remaining_monthly_credits_can_be_spent(self):
-        user = self.make_user(3, 0)
-        self.assertEqual(BacktestService.charge_user(user, 3), (True, 0, 0))
-
-    def test_insufficient_credits_charges_nothing(self):
-        user = self.make_user(2, 1)
-        self.assertEqual(BacktestService.charge_user(user, 5), (False, None, None))
-        user.refresh_from_db()
-        self.assertEqual((user.monthly_credits, user.account_credits), (2, 1))
-
-
 class GetDataTests(SimpleTestCase):
     START = datetime.datetime(2024, 1, 3, tzinfo=UTC)
     END = datetime.datetime(2024, 1, 10, tzinfo=UTC)

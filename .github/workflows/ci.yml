@@ -19,6 +19,19 @@ jobs:
     name: Backend tests and checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # A throwaway Postgres for the credit concurrency tests (SQLite has no row locks). Free, and gone after the run.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,6 +61,10 @@ jobs:
         run: python manage.py makemigrations api --check --dry-run --settings=algo_tracker_backend.test_settings
       - name: Tests
         run: python manage.py test
+      - name: Whole suite again on Postgres (includes the credit concurrency tests)
+        run: python manage.py test
+        env:
+          TEST_DATABASE_URL: postgres://postgres:ci-only-password@127.0.0.1:5432/postgres
 
   docker:
     name: Docker config and image

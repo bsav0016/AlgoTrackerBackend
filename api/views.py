@@ -2,6 +2,7 @@ import hmac
 import logging
 import math
 import time
+import uuid
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -272,72 +273,95 @@ class BacktestView(APIView):
 
                 signals = [Signal(**signal) for signal in signals]
 
-                result, attempts = BacktestService.conduct_backtest(symbol, interval, start_date, end_date, signals)
-                raw_result = result.to_dict(orient='records')
-
-                processed_result = []
-                for entry in raw_result:
-                    indicators = {}
-                    core_fields = ["datetime", "close", "buy", "sell", "owned", "return"]
-
-                    for key, value in entry.items():
-                        if key not in core_fields:
-                            indicators[key] = 0 if (isinstance(value, float) and np.isnan(value)) else value
-
-                    transformed_entry = {k: (0 if (isinstance(entry[k], float) and np.isnan(entry[k])) else entry[k])
-                                         for k in core_fields}
-                    transformed_entry["indicators"] = indicators
-
-                    processed_result.append(transformed_entry)
-
-                img_base64, img_base64_no_signals = BacktestService.generate_backtest_chart(result)
-                percent_return, percent_return_adj = BacktestService.calculate_percent_return(result)
-                sharpe_ratio, sharpe_ratio_adj = BacktestService.calculate_sharpe_ratio(result)
-                sortino_ratio, sortino_ratio_adj = BacktestService.calculate_sortino_ratio(result)
-
-                duration_minutes = (result.iloc[-1]["datetime"] - result.iloc[0]["datetime"]).total_seconds() / 60
-                minutes_per_year = 525600
-                annualize_factor = minutes_per_year / duration_minutes
-
-                seconds_per_year = minutes_per_year * 60
-                seconds_per_year_adj = seconds_per_year * SYMBOLS[symbol] / (365 * 24)
-                periods_per_year = seconds_per_year_adj / INTERVAL_MAP[interval]["seconds"]
-                sqrt_n = math.sqrt(periods_per_year)
-
-                percent_return = finite_or_zero(percent_return * annualize_factor)
-                percent_return_adj = finite_or_zero(percent_return_adj * annualize_factor)
-                sharpe_ratio = finite_or_zero(sharpe_ratio * sqrt_n)
-                sharpe_ratio_adj = finite_or_zero(sharpe_ratio_adj * sqrt_n)
-                sortino_ratio = finite_or_zero(sortino_ratio * sqrt_n)
-                sortino_ratio_adj = finite_or_zero(sortino_ratio_adj * sqrt_n)
-
+                # Reserve the cost of one data request before spending any market-data quota; settle the
+                # extra requests once we know how many it took, and give everything back if the run fails.
                 user = request.user
-                amount = BACKTEST_BASE_COST * attempts
-                sufficient_funds, account_credits, monthly_credits = BacktestService.charge_user(user, amount)
+                spend_key = f"backtest:{uuid.uuid4().hex}"
+                base_cost = int(BACKTEST_BASE_COST)
+                try:
+                    balances = credits.spend(user.pk, base_cost, f"{spend_key}:reserve", "backtest",
+                                             meta={"symbol": symbol, "interval": interval})
+                except credits.InsufficientCredits:
+                    return Response({"detail": f"Requires ${base_cost}"}, status=status.HTTP_402_PAYMENT_REQUIRED)
 
-                if not sufficient_funds:
-                    return Response({"detail": f"Requires ${amount}"}, status=status.HTTP_402_PAYMENT_REQUIRED)
-
-                response_data = {
-                    "result": processed_result,
-                    "image": img_base64,
-                    "image_no_signals": img_base64_no_signals,
-                    "percent_return": percent_return,
-                    "percent_return_adj": percent_return_adj,
-                    "sharpe_ratio": sharpe_ratio,
-                    "sharpe_ratio_adj": sharpe_ratio_adj,
-                    "sortino_ratio": sortino_ratio,
-                    "sortino_ratio_adj": sortino_ratio_adj,
-                    "user_account_credits": account_credits,
-                    "user_monthly_credits": monthly_credits
-                }
-
-                return Response(response_data, status=status.HTTP_200_OK)
+                try:
+                    return self.run_and_settle(
+                        user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals)
+                except Exception:
+                    for suffix in ("reserve", "settle"):
+                        credits.refund(user.pk, f"{spend_key}:{suffix}", f"{spend_key}:{suffix}:refund", "backtest")
+                    raise
             except Exception as e:
                 logger.exception("Error building response")
                 return Response({"detail": "Internal Error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def run_and_settle(self, user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals):
+        result, attempts = BacktestService.conduct_backtest(symbol, interval, start_date, end_date, signals)
+        extra_cost = base_cost * (attempts - 1)
+        if extra_cost > 0:
+            try:
+                balances = credits.spend(user.pk, extra_cost, f"{spend_key}:settle", "backtest",
+                                         meta={"symbol": symbol, "interval": interval, "attempts": attempts})
+            except credits.InsufficientCredits:
+                credits.refund(user.pk, f"{spend_key}:reserve", f"{spend_key}:reserve:refund", "backtest")
+                return Response({"detail": f"Requires ${base_cost * attempts}"},
+                                status=status.HTTP_402_PAYMENT_REQUIRED)
+
+        raw_result = result.to_dict(orient='records')
+
+        processed_result = []
+        for entry in raw_result:
+            indicators = {}
+            core_fields = ["datetime", "close", "buy", "sell", "owned", "return"]
+
+            for key, value in entry.items():
+                if key not in core_fields:
+                    indicators[key] = 0 if (isinstance(value, float) and np.isnan(value)) else value
+
+            transformed_entry = {k: (0 if (isinstance(entry[k], float) and np.isnan(entry[k])) else entry[k])
+                                 for k in core_fields}
+            transformed_entry["indicators"] = indicators
+
+            processed_result.append(transformed_entry)
+
+        img_base64, img_base64_no_signals = BacktestService.generate_backtest_chart(result)
+        percent_return, percent_return_adj = BacktestService.calculate_percent_return(result)
+        sharpe_ratio, sharpe_ratio_adj = BacktestService.calculate_sharpe_ratio(result)
+        sortino_ratio, sortino_ratio_adj = BacktestService.calculate_sortino_ratio(result)
+
+        duration_minutes = (result.iloc[-1]["datetime"] - result.iloc[0]["datetime"]).total_seconds() / 60
+        minutes_per_year = 525600
+        annualize_factor = minutes_per_year / duration_minutes
+
+        seconds_per_year = minutes_per_year * 60
+        seconds_per_year_adj = seconds_per_year * SYMBOLS[symbol] / (365 * 24)
+        periods_per_year = seconds_per_year_adj / INTERVAL_MAP[interval]["seconds"]
+        sqrt_n = math.sqrt(periods_per_year)
+
+        percent_return = finite_or_zero(percent_return * annualize_factor)
+        percent_return_adj = finite_or_zero(percent_return_adj * annualize_factor)
+        sharpe_ratio = finite_or_zero(sharpe_ratio * sqrt_n)
+        sharpe_ratio_adj = finite_or_zero(sharpe_ratio_adj * sqrt_n)
+        sortino_ratio = finite_or_zero(sortino_ratio * sqrt_n)
+        sortino_ratio_adj = finite_or_zero(sortino_ratio_adj * sqrt_n)
+
+        response_data = {
+            "result": processed_result,
+            "image": img_base64,
+            "image_no_signals": img_base64_no_signals,
+            "percent_return": percent_return,
+            "percent_return_adj": percent_return_adj,
+            "sharpe_ratio": sharpe_ratio,
+            "sharpe_ratio_adj": sharpe_ratio_adj,
+            "sortino_ratio": sortino_ratio,
+            "sortino_ratio_adj": sortino_ratio_adj,
+            "user_account_credits": balances.account,
+            "user_monthly_credits": balances.monthly
+        }
+
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class StrategyView(APIView):

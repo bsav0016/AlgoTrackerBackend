@@ -6,7 +6,10 @@ refuses to apply the same business event twice.
 """
 from dataclasses import dataclass
 
+from datetime import timedelta
+
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 
 from api.models import CreditTransaction, CustomUser
 
@@ -29,6 +32,9 @@ class CreditResult:
 def apply(user_id, changes, key, kind, meta=None):
     """Apply signed changes, e.g. `{"account": 500}` or `{"monthly": -3, "account": -1}`, exactly once per `key`.
 
+    `changes` may also be a function `(monthly_balance, account_balance) -> dict`, called while the user row is
+    locked, for changes that depend on the balances (see `spend`).
+
     A repeat of a `key` that was already applied is a no-op and returns the current balances with
     `replayed=True`, which makes webhook redeliveries and job retries safe. Raises `InsufficientCredits`
     (writing nothing) if a bucket would go negative, and `ValueError` for an unknown bucket, an empty key, or a key
@@ -36,10 +42,8 @@ def apply(user_id, changes, key, kind, meta=None):
     """
     if not key:
         raise ValueError("A credit change needs an idempotency key")
-    changes = {bucket: int(amount) for bucket, amount in changes.items() if int(amount) != 0}
-    unknown = set(changes) - set(_FIELDS)
-    if unknown:
-        raise ValueError(f"Unknown credit bucket: {', '.join(sorted(unknown))}")
+    if not callable(changes):
+        changes = _clean(changes)
 
     try:
         with transaction.atomic():
@@ -50,6 +54,8 @@ def apply(user_id, changes, key, kind, meta=None):
                 return CreditResult(user.account_credits, user.monthly_credits, replayed=True)
 
             balances = {bucket: getattr(user, field) for bucket, field in _FIELDS.items()}
+            if callable(changes):
+                changes = _clean(changes(balances[MONTHLY], balances[ACCOUNT]))
             for bucket, amount in changes.items():
                 if balances[bucket] + amount < 0:
                     raise InsufficientCredits(f"{bucket} credits would go below zero")
@@ -75,6 +81,14 @@ def apply(user_id, changes, key, kind, meta=None):
         return CreditResult(user.account_credits, user.monthly_credits, replayed=True)
 
 
+def _clean(changes):
+    changes = {bucket: int(amount) for bucket, amount in changes.items() if int(amount) != 0}
+    unknown = set(changes) - set(_FIELDS)
+    if unknown:
+        raise ValueError(f"Unknown credit bucket: {', '.join(sorted(unknown))}")
+    return changes
+
+
 def _require_same_user(earlier, user_id, key):
     # A key names one business event, so it belongs to one user. Reusing it for someone else is a caller bug,
     # and silently treating it as a replay would hide a missing credit.
@@ -95,3 +109,42 @@ def split_spend(monthly_balance, account_balance, amount):
         raise InsufficientCredits("Not enough credits")
     from_monthly = min(monthly_balance, amount)
     return {MONTHLY: -from_monthly, ACCOUNT: -(amount - from_monthly)}
+
+
+def spend(user_id, amount, key, kind, meta=None):
+    """Pay `amount` credits, monthly credits first, exactly once per `key`.
+
+    The split is worked out while the user row is locked, so concurrent spends cannot both use the same
+    credits. Raises `InsufficientCredits` (writing nothing) when the two balances cannot cover it.
+    """
+    return apply(user_id, lambda monthly, account: split_spend(monthly, account, amount), key, kind, meta)
+
+
+def refund(user_id, key, refund_key, kind, meta=None):
+    """Undo what `key` applied, putting each amount back in the bucket it came from, once per `refund_key`.
+
+    Returns the new `CreditResult`, or `None` when `key` was never applied (so there is nothing to give back).
+    """
+    rows = list(CreditTransaction.objects.filter(idempotency_key=key, user_id=user_id))
+    if not rows:
+        return None
+    return apply(user_id, {row.bucket: -row.amount for row in rows}, refund_key, kind,
+                 meta={**(meta or {}), "refund_of": key})
+
+
+def reset_monthly(user_id, allowance, days=30):
+    """If the user's monthly reset date has passed, set the monthly balance to `allowance`.
+
+    Unused monthly credits expire (purchased account credits are never touched). Happens once per reset date,
+    under the user lock, and the next reset date moves `days` ahead. Returns True when a reset happened.
+    """
+    with transaction.atomic():
+        user = CustomUser.objects.select_for_update().get(pk=user_id)
+        now = timezone.now()
+        due = user.reset_monthly_credits
+        if now <= due:
+            return False
+        apply(user_id, {MONTHLY: allowance - user.monthly_credits}, f"monthly:{user_id}:{int(due.timestamp())}",
+              "monthly_grant", meta={"expired": user.monthly_credits, "granted": allowance})
+        CustomUser.objects.filter(pk=user_id).update(reset_monthly_credits=now + timedelta(days=days))
+        return True

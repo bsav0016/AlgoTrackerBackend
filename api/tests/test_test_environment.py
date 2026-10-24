@@ -21,7 +21,11 @@ class TestIsolationTests(SimpleTestCase):
     def test_credentials_and_services_are_test_values(self):
         self.assertEqual(settings.TWELVE_DATA_API_KEY, "test-twelve-data-key")
         self.assertTrue(settings.STRIPE_SECRET_KEY.startswith("sk_test_"))
-        self.assertEqual(settings.DATABASES["default"]["ENGINE"], "django.db.backends.sqlite3")
+        database = settings.DATABASES["default"]
+        if database["ENGINE"] == "django.db.backends.postgresql":  # only when TEST_DATABASE_URL opts in
+            self.assertIn(database["HOST"], ("localhost", "127.0.0.1", "::1", "postgres"))
+        else:
+            self.assertEqual(database["ENGINE"], "django.db.backends.sqlite3")
         self.assertEqual(settings.EMAIL_BACKEND, "django.core.mail.backends.locmem.EmailBackend")
         self.assertIn(":1/", settings.REDIS_URL)  # unreachable port, never a real Redis
 
