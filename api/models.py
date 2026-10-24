@@ -296,6 +296,45 @@ class IndicatorValue(models.Model):
     value = models.DecimalField(max_digits=10, decimal_places=2)
 
 
+class CreditTransaction(models.Model):
+    """One signed change to one of a user's two credit balances.
+
+    Every balance change is written here by `api.credits.apply`, which also updates the cached totals on
+    `CustomUser`. `idempotency_key` names the business event (a store transaction, a charge), so the same event
+    can never be applied twice. Rows are never edited or deleted by the app.
+    """
+    ACCOUNT = "account"
+    MONTHLY = "monthly"
+    BUCKETS = [(ACCOUNT, "Account credits"), (MONTHLY, "Monthly credits")]
+
+    KINDS = [
+        ("purchase", "Purchase"),
+        ("backtest", "Backtest"),
+        ("subscription", "Strategy subscription"),
+        ("monthly_grant", "Monthly grant"),
+        ("promo", "Promo code"),
+        ("adjustment", "Adjustment"),
+    ]
+
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="credit_transactions")
+    bucket = models.CharField(max_length=10, choices=BUCKETS)
+    amount = models.IntegerField()  # signed: positive adds credits, negative spends them
+    balance_after = models.IntegerField()  # that bucket's balance once this row applied
+    kind = models.CharField(max_length=20, choices=KINDS)
+    idempotency_key = models.CharField(max_length=128)
+    created_at = models.DateTimeField(default=timezone.now)
+    meta = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["idempotency_key", "bucket"], name="unique_credit_event_per_bucket"),
+        ]
+        indexes = [models.Index(fields=["user", "-id"], name="credit_tx_user_recent")]
+
+    def __str__(self):
+        return f"{self.user_id} {self.bucket} {self.amount:+d} ({self.kind})"
+
+
 class PaymentIntent(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="payment_intents")
     payment_intent_id = models.CharField(max_length=255)

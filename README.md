@@ -23,6 +23,7 @@ Back-testing a strategy and watching live prices around the clock are too heavy 
 - **Live signals** – a separate worker keeps a websocket open to the TwelveData price feed; price ticks are folded into open/high/low/close candles per interval, and each finished candle is handed to an RQ job that checks each subscribed strategy and updates its position. The job locks the strategy and records the last candle it handled, so a repeated or out-of-order job does not trade or notify twice. Pushes are sent after the job's transaction commits, so a rolled-back trade never notifies
 - **Push notifications** – sent to a user's device through Expo's push service when a strategy changes position, plus Firebase for Android
 - **Credits and payments** – backtests and monthly subscriptions are charged in credits; credits are bought with Stripe payment intents or through RevenueCat (store purchases)
+- **Credit ledger** – every balance change is meant to go through `api/credits.py`, which writes a `CreditTransaction` row per change and refuses to apply the same event key twice. The two balance columns on the user are a cached total. The payment and charge code is being moved onto it in stages (see the tracking issue)
 
 ## Stack
 
