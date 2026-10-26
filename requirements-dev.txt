@@ -1,2 +1,2 @@
 # Developer/CI tooling only; not installed in the Docker image.
-ruff==0.17.0
+ruff==0.17.2

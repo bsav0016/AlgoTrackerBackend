@@ -10,9 +10,9 @@ websockets==15.0.1
 dotenv==0.9.9
 requests==2.34.2
 pandas==2.3.3
-numpy==2.5.3
+numpy==2.5.4
 django-redis==5.4.0
-asgiref==3.12.1
+asgiref==3.13.0
 matplotlib==3.11.2
 django-push-notifications==3.3.0
 firebase_admin==6.9.0
