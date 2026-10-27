@@ -15,7 +15,7 @@ from api.serializers import (UserRegistrationSerializer, LoginSerializer, Custom
                              CreditTransactionSerializer,
                              BacktestRequestSerializer, StrategyRequestSerializer)
 from api import credits
-from api.models import (Strategy, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
+from api.models import (Strategy, PushDevice, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
                         RevenueCatConfirmation)
 from api.services.auth_service import AuthService
 from api.services.backtest_service import BacktestService
@@ -219,32 +219,27 @@ class DeviceIDView(APIView):
     permission_classes = [IsAuthenticated, ]
 
     def post(self, request):
-        """Add a new device ID to the user's list."""
+        """Register a push token for the signed-in account. A token already held by another account moves here."""
         device_id = request.data.get("device_id")
 
         if not device_id:
             return Response({"error": "Device ID is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = request.user
-        if device_id not in user.device_ids:
-            user.add_device_id(device_id)
-            return Response({"message": "Device ID added successfully"}, status=status.HTTP_200_OK)
-        else:
-            return Response({"message": "Device ID already exists"}, status=status.HTTP_200_OK)
+        _, created = PushDevice.register(request.user, device_id, request.data.get("platform") or "")
+        message = "Device ID added successfully" if created else "Device ID already exists"
+        return Response({"message": message}, status=status.HTTP_200_OK)
 
     def delete(self, request):
-        """Remove a device ID from the user's list."""
+        """Remove one of the signed-in account's push tokens."""
         device_id = request.data.get("device_id")
 
         if not device_id:
             return Response({"error": "Device ID is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = request.user
-        if device_id in user.device_ids:
-            user.remove_device_id(device_id)
+        deleted, _ = PushDevice.objects.filter(user=request.user, token=device_id).delete()
+        if deleted:
             return Response({"message": "Device ID removed successfully"}, status=status.HTTP_200_OK)
-        else:
-            return Response({"error": "Device ID not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"error": "Device ID not found"}, status=status.HTTP_404_NOT_FOUND)
 
 
 class HealthView(APIView):

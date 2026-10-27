@@ -7,7 +7,7 @@ from django.core import mail
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from api.models import CreditTransaction, CustomUser, Strategy
+from api.models import CreditTransaction, CustomUser, PushDevice, Strategy
 from api.tests.helpers import FakeRedis, ledger
 from api.views import MAX_OTP_ATTEMPTS
 
@@ -185,15 +185,39 @@ class DeviceIdTests(APITestCase):
         self.user = make_user()
         self.client.force_authenticate(self.user)
 
+    def tokens(self, user):
+        return sorted(user.push_devices.values_list("token", flat=True))
+
     def test_add_is_idempotent_and_remove_deletes(self):
         for _ in range(2):
             self.assertEqual(self.client.post("/api/device-id/", {"device_id": "tok"}, format="json").status_code, 200)
-        self.user.refresh_from_db()
-        self.assertEqual(self.user.device_ids, ["tok"])
+        self.assertEqual(self.tokens(self.user), ["tok"])
 
         self.assertEqual(self.client.delete("/api/device-id/", {"device_id": "tok"}, format="json").status_code, 200)
-        self.user.refresh_from_db()
-        self.assertEqual(self.user.device_ids, [])
+        self.assertEqual(self.tokens(self.user), [])
+
+    def test_registering_again_reactivates_and_records_the_platform(self):
+        self.client.post("/api/device-id/", {"device_id": "tok"}, format="json")
+        PushDevice.objects.update(active=False)
+        self.client.post("/api/device-id/", {"device_id": "tok", "platform": "ios"}, format="json")
+        device = PushDevice.objects.get(token="tok")
+        self.assertTrue(device.active)
+        self.assertEqual(device.platform, "ios")
+
+    def test_a_token_registered_by_a_second_account_moves_to_it(self):
+        other = make_user(username="other", email="other@example.com")
+        self.client.post("/api/device-id/", {"device_id": "tok"}, format="json")
+        self.client.force_authenticate(other)
+        self.assertEqual(self.client.post("/api/device-id/", {"device_id": "tok"}, format="json").status_code, 200)
+        self.assertEqual(self.tokens(self.user), [])
+        self.assertEqual(self.tokens(other), ["tok"])
+        self.assertEqual(PushDevice.objects.count(), 1)
+
+    def test_an_account_cannot_remove_a_token_it_does_not_hold(self):
+        other = make_user(username="other", email="other@example.com")
+        PushDevice.register(other, "tok")
+        self.assertEqual(self.client.delete("/api/device-id/", {"device_id": "tok"}, format="json").status_code, 404)
+        self.assertEqual(self.tokens(other), ["tok"])
 
     def test_missing_or_unknown_device_ids_are_errors(self):
         self.assertEqual(self.client.post("/api/device-id/", {}, format="json").status_code, 400)

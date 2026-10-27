@@ -3,7 +3,7 @@ from unittest import mock
 from asgiref.sync import async_to_sync
 from django.test import TestCase
 
-from api.models import Strategy, Trade
+from api.models import PushDevice, Strategy, Trade
 from api.redis_manager import RedisManager
 from api.services.notification_service import NotificationService
 from api.tasks import process_strategy_task
@@ -36,7 +36,8 @@ class LivePipelineCase(TestCase):
         self.push = patcher.start()
         self.addCleanup(patcher.stop)
 
-        self.user = make_user(device_ids=["ExponentPushToken[a]"])
+        self.user = make_user()
+        PushDevice.register(self.user, "ExponentPushToken[a]")
 
     def run_job(self, *args):
         """Runs a job like a worker: pushes are sent when its transaction commits."""
