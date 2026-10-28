@@ -32,6 +32,11 @@ os.environ.pop("FIREBASE_CREDENTIALS_PATH", None)
 
 from .settings import *  # noqa: E402,F401,F403
 
+# The rate limits count in the "throttle" cache; keep it in process, and make the limits too high to get in
+# the way of the other tests (the throttle tests set their own).
+CACHES["throttle"] = {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
+AUTH_THROTTLE_RATES = {scope: "100000/min" for scope in AUTH_THROTTLE_RATES}
+
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 TEST_RUNNER = "algo_tracker_backend.test_runner.NoExternalNetworkRunner"
 
