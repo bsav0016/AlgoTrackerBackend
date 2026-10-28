@@ -21,7 +21,7 @@ Back-testing a strategy and watching live prices around the clock are too heavy 
 - **Strategies** – a strategy is a symbol, an interval, and lists of buy and sell signals built from indicators (RSI, SMA, EMA, MACD, Stochastic Oscillator, Bollinger %B, ADX)
 - **Backtesting** (`api/services/backtest_service.py`) – fetches historical prices, finds buy and sell points from the signals, and computes returns, Sharpe and Sortino ratios, and annual percent return against the asset itself; produces charts with matplotlib
 - **Live signals** – a separate worker keeps a websocket open to the TwelveData price feed; price ticks are folded into open/high/low/close candles per interval, and each finished candle is handed to an RQ job that checks each subscribed strategy and updates its position. The job locks the strategy and records the last candle it handled, so a repeated or out-of-order job does not trade or notify twice. The notification and one delivery row per device are written in the same transaction as the trade, and a send job is queued after it commits, so a rolled-back trade never notifies
-- **Push notifications** – sent to a user's device through Expo's push service when a strategy changes position, plus Firebase for Android. Each push is a database row per device (`Notification`, `PushDelivery`) sent by an RQ job that retries failures with a growing delay and deactivates tokens Expo reports as unregistered
+- **Push notifications** – sent to a user's device through Expo's push service when a strategy changes position, plus Firebase for Android. Each push is a database row per device (`Notification`, `PushDelivery`) sent by an RQ job that retries failures with a growing delay, and a sweeper that re-queues missed sends and reads Expo receipts; tokens Expo reports as unregistered are deactivated
 - **Credits and payments** – backtests and monthly subscriptions are charged in credits; credits are bought with Stripe payment intents or through RevenueCat (store purchases)
 - **Credit ledger** – every balance change goes through `api/credits.py`, which locks the user row, writes a `CreditTransaction` row per change and refuses to apply the same event key twice. The two balance columns on the user are a cached total. Purchases and promo codes are keyed on the payment, a backtest reserves the cost of one data request before fetching and settles or refunds afterwards, a strategy subscription is keyed on its billing date, and unused monthly credits expire at each reset while purchased credits carry over
 
@@ -35,12 +35,13 @@ Back-testing a strategy and watching live prices around the clock are too heavy 
 
 ## Architecture
 
-`docker-compose.yml` runs six services:
+`docker-compose.yml` runs seven services:
 
 | Service | Role |
 | --- | --- |
 | `web` | Django API (gunicorn) |
-| `worker-tasks` | `python manage.py rqworker default` – runs strategy checks |
+| `worker-tasks` | `python manage.py rqworker default --with-scheduler` – runs strategy checks and push sends (the scheduler times push retries) |
+| `worker-push-sweeper` | `python manage.py push_sweep` – every minute re-queues pushes whose send job was missed and settles sent pushes from Expo's receipts |
 | `worker-websocket` | `python websocket_worker.py` – TwelveData listener with automatic reconnect |
 | `db` | PostgreSQL 16 |
 | `redis` | Redis 7 – queue and cache |
@@ -116,7 +117,7 @@ Static checks use Ruff (`pip install -r requirements-dev.txt`, then `ruff check 
 5. Optional, on a fresh Redis: `docker compose exec web python manage.py seed_candles` loads recent candles (with highs and lows) so strategies have history straight away. Pairs that already have candles are skipped, `--force` reloads them, and strategies are not run on history.
 6. Point the app's `API_URL` at the server (for example `http://localhost:8000`, or your `DOMAIN`).
 
-`GET /api/health/` (no login) reports whether the database and Redis are up and how many seconds since the websocket worker last received a price (`null` if none yet); it returns 503 if the database or Redis is down. A quiet feed is not an error, since markets close. The `web` container uses it as its healthcheck. Logs go to stderr (`docker compose logs worker-websocket`); set `LOG_LEVEL=DEBUG` to log every price message.
+`GET /api/health/` (no login) reports whether the database and Redis are up and how many seconds since the websocket worker last received a price (`null` if none yet), plus the push backlog (`pending_deliveries`, `failed_deliveries_24h`, `oldest_pending_seconds`); it returns 503 if the database or Redis is down. A quiet feed is not an error, since markets close. The `web` container uses it as its healthcheck. Logs go to stderr (`docker compose logs worker-websocket`); set `LOG_LEVEL=DEBUG` to log every price message.
 
 Production runs the same compose file on a single DigitalOcean droplet; deploys are manual (`git pull`, `docker compose up --build -d`).
 
@@ -171,7 +172,7 @@ The production server is currently paused. When it is brought back up:
 
 - Tests cover the core logic and API but not the websocket worker or the TwelveData history loader. Expo is faked at the HTTP edge. The live signal path is tested from `RedisManager.record_tick` onward. Gaps in the feed leave missing candles (empty intervals are skipped, not filled). A candle that was open while the worker was down is stored with only the ticks it saw. Run `seed_candles` on a fresh Redis, otherwise strategies only signal once enough live candles have built up.
 - Live signals look at the last 500 candles and backtests at up to 5000, so recursive indicators (EMA, MACD, ADX) can differ slightly between the two on long histories. A strategy with no sell signal buys and holds. Windows are capped at 500.
-- Pushes are sent after the trade commits. If the worker dies between the commit and queueing the send job, or while a retry is waiting, the delivery rows stay `pending` but nothing re-queues them yet (a sweeper is planned), so that notification is late rather than lost. Delivery receipts are not fetched yet.
+- Pushes are sent after the trade commits. If the worker dies between the commit and queueing the send job, or while a retry is waiting, the delivery rows stay `pending` and the sweeper re-queues them within a minute or two, so that notification is late rather than lost. Expo receipts are checked 15 minutes to 24 hours after sending; a receipt Expo never produces leaves the delivery `sent`.
 - Deploys are manual; CI only runs checks and tests.
 - Views, the Redis price loader and settings log through Python's `logging`; the websocket client and the Expo push client still use `print`, so their output is not leveled or routed by the logging config.
 - `requirements.txt` pins direct dependencies only, so transitive versions can still drift between builds.
