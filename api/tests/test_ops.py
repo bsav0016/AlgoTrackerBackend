@@ -35,7 +35,8 @@ class HealthTests(FakeRedisCase):
         response = self.get()
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, {"status": "ok", "database": True, "redis": True,
-                                         "seconds_since_last_tick": None})
+                                         "seconds_since_last_tick": None, "pending_deliveries": 0,
+                                         "failed_deliveries_24h": 0, "oldest_pending_seconds": None})
 
     def test_reports_how_long_ago_the_last_tick_arrived(self):
         RedisManager.mark_tick(int(time.time()) - 42)

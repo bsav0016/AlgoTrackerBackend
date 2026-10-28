@@ -1,6 +1,6 @@
 """Shared fakes for the test suite. Nothing here talks to a real service."""
 import datetime
-import json
+import json as json_module
 from unittest import mock
 
 
@@ -106,6 +106,10 @@ class FakeExpo:
         self.requests = 0
         self.errors = {}
         self.fail_request = None
+        self.receipt_errors = {}   # token -> error name its receipt reports
+        self.receipts_ready = True
+        self.receipt_requests = 0
+        self.tickets = {}          # ticket id -> token
 
     def install(self, testcase):
         from api.services import notification_service
@@ -114,17 +118,31 @@ class FakeExpo:
         testcase.addCleanup(patcher.stop)
         return self
 
-    def post(self, url, data=None, timeout=None):
+    def post(self, url, data=None, json=None, timeout=None):
+        if url.endswith("/push/getReceipts"):
+            return self.get_receipts(json["ids"])
         self.requests += 1
         if self.fail_request is not None:
             raise self.fail_request
         tickets = []
-        for message in json.loads(data):
+        for message in json_module.loads(data):
             error = self.errors.get(message["to"])
             if error:
                 tickets.append({"status": "error", "message": error, "details": {"error": error}})
             else:
                 self.sent.append((message["to"], message["body"]))
+                self.tickets[f"ticket-{len(self.sent)}"] = message["to"]
                 self.payloads.append(message.get("data"))
                 tickets.append({"status": "ok", "id": f"ticket-{len(self.sent)}"})
         return FakeResponse(200, {"data": tickets})
+
+    def get_receipts(self, ids):
+        self.receipt_requests += 1
+        if self.fail_request is not None:
+            raise self.fail_request
+        receipts = {}
+        for ticket_id in ids if self.receipts_ready else []:
+            error = self.receipt_errors.get(self.tickets.get(ticket_id))
+            receipts[ticket_id] = ({"status": "error", "message": error, "details": {"error": error}}
+                                   if error else {"status": "ok"})
+        return FakeResponse(200, {"data": receipts})

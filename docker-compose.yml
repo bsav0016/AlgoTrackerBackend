@@ -64,6 +64,22 @@ services:
       redis:
         condition: service_healthy
 
+  worker-push-sweeper:
+    build: .
+    restart: unless-stopped
+    command: python manage.py push_sweep
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-algotracker}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-algotracker}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./${FIREBASE_CREDENTIALS_PATH}:/app/${FIREBASE_CREDENTIALS_PATH}:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   worker-websocket:
     build: .
     restart: unless-stopped

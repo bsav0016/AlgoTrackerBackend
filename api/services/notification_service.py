@@ -1,6 +1,7 @@
 # Used: https://github.com/expo-community/expo-server-sdk-python
 from exponent_server_sdk import PushClient, PushMessage
 import requests
+from types import SimpleNamespace
 
 # Optionally providing an access token within a session if you have enabled push security
 session = requests.Session()
@@ -30,3 +31,10 @@ class NotificationService:
     def error_code(ticket):
         """Expo's error name for a failed ticket (for example `DeviceNotRegistered`), or ''."""
         return (ticket.details or {}).get("error", "")
+
+    @staticmethod
+    def fetch_receipts(ticket_ids):
+        """Expo's delivery receipts for `ticket_ids`, as `{ticket_id: PushReceipt}`. Receipts that are not ready
+        yet (or are older than Expo keeps them, about a day) are simply absent. Raises when the request fails."""
+        tickets = [SimpleNamespace(id=ticket_id) for ticket_id in ticket_ids]
+        return {receipt.id: receipt for receipt in PushClient(session=session).check_receipts_multiple(tickets)}

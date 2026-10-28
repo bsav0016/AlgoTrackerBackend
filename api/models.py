@@ -290,10 +290,12 @@ class PushDelivery(models.Model):
     """One notification going to one device. The job that sends it can run any number of times: only rows still
     `pending` and due are sent, and a row never leaves `sent` or a final state."""
     PENDING = "pending"
-    SENT = "sent"
+    SENT = "sent"            # Expo accepted it; the receipt has not confirmed delivery yet
+    DELIVERED = "delivered"  # Expo's receipt says it reached the push service (FCM / APNs)
     FAILED = "failed"
     DEAD_TOKEN = "dead_token"
-    STATUSES = [(PENDING, "Pending"), (SENT, "Sent"), (FAILED, "Failed"), (DEAD_TOKEN, "Dead token")]
+    STATUSES = [(PENDING, "Pending"), (SENT, "Sent"), (DELIVERED, "Delivered"), (FAILED, "Failed"),
+                (DEAD_TOKEN, "Dead token")]
 
     notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name="deliveries")
     device = models.ForeignKey(PushDevice, on_delete=models.CASCADE, related_name="deliveries")
