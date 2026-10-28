@@ -17,6 +17,7 @@ from api.serializers import (UserRegistrationSerializer, LoginSerializer, Custom
 from api import credits
 from api.models import (Strategy, PushDevice, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
                         RevenueCatConfirmation)
+from api.push_sweep import backlog as push_backlog
 from api.services.auth_service import AuthService
 from api.services.backtest_service import BacktestService
 from api.indicators.signal import Signal
@@ -262,8 +263,15 @@ class HealthView(APIView):
             logger.exception("Health check: Redis unavailable")
             redis = False
         healthy = database and redis
+        # Informational: a backlog does not fail the check, it shows in monitoring.
+        pushes = {"pending_deliveries": None, "failed_deliveries_24h": None, "oldest_pending_seconds": None}
+        if database:
+            try:
+                pushes = push_backlog()
+            except Exception:
+                logger.exception("Health check: push backlog unavailable")
         return Response({"status": "ok" if healthy else "unavailable", "database": database, "redis": redis,
-                         "seconds_since_last_tick": seconds_since_last_tick},
+                         "seconds_since_last_tick": seconds_since_last_tick, **pushes},
                         status=status.HTTP_200_OK if healthy else status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
