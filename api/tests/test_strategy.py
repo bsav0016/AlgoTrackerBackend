@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from api.tests.helpers import ledger
-from api.models import CreditTransaction, CustomUser, Strategy, Trade
+from api.models import CreditTransaction, CustomUser, PushDevice, Strategy, Trade
 from api.services.notification_service import NotificationService
 
 RISING = pd.DataFrame({"close": [10.0, 11.0, 12.0]})   # close above its 2-bar average
@@ -35,7 +35,9 @@ class CheckSignalsTests(TestCase):
     """Live signal handling. Push delivery is mocked; no notification ever leaves the process."""
 
     def setUp(self):
-        self.user = make_user(device_ids=["ExponentPushToken[a]", "ExponentPushToken[b]"])
+        self.user = make_user()
+        for token in ("ExponentPushToken[a]", "ExponentPushToken[b]"):
+            PushDevice.register(self.user, token)
         patcher = mock.patch.object(NotificationService, "send_push_message")
         self.push = patcher.start()
         self.addCleanup(patcher.stop)
@@ -93,8 +95,7 @@ class CheckSignalsTests(TestCase):
         self.push.assert_not_called()
 
     def test_user_without_devices_is_not_notified_but_trade_is_still_recorded(self):
-        self.user.device_ids = []
-        self.user.save()
+        self.user.push_devices.all().delete()
         strategy = make_strategy(self.user, position=1)
         self.check(strategy, RISING)
         self.push.assert_not_called()

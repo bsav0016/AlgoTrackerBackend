@@ -73,20 +73,6 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
         blank=True
     )
 
-    def add_device_id(self, device_id: str):
-        """Add a new device ID to the user's list."""
-        if not isinstance(self.device_ids, list):
-            self.device_ids = []
-        if device_id not in self.device_ids:
-            self.device_ids.append(device_id)
-            self.save(update_fields=["device_ids"])
-
-    def remove_device_id(self, device_id: str):
-        """Remove a device ID from the user's list."""
-        if device_id in self.device_ids:
-            self.device_ids.remove(device_id)
-            self.save(update_fields=["device_ids"])
-
     def check_monthly_credits(self):
         """Reset monthly funds if the reset date has passed."""
         from api import credits
@@ -95,6 +81,27 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.username
+
+
+class PushDevice(models.Model):
+    """One phone's Expo push token. A token belongs to exactly one account: registering it again from another
+    account moves it, so a phone that signs into a second account stops notifying the first."""
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="push_devices")
+    token = models.CharField(max_length=255, unique=True)
+    platform = models.CharField(max_length=20, blank=True, default="")
+    active = models.BooleanField(default=True)
+    last_seen_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @classmethod
+    def register(cls, user, token, platform=""):
+        """Bind `token` to `user` (moving it from any other account) and mark it active. Returns (device, created)."""
+        device, created = cls.objects.update_or_create(
+            token=token, defaults={"user": user, "platform": platform, "active": True, "last_seen_at": timezone.now()})
+        return device, created
+
+    def __str__(self):
+        return f"{self.user_id}:{self.token}"
 
 
 @receiver(post_save, sender=CustomUser)
@@ -237,7 +244,7 @@ class Strategy(models.Model):
         would roll back the trade while the push had already gone out (a retry would then notify twice). If the
         transaction rolls back, nothing is sent. A failure for one device does not stop the others.
         """
-        device_ids = list(self.user.device_ids)
+        device_ids = list(self.user.push_devices.filter(active=True).values_list("token", flat=True))
         transaction.on_commit(lambda: self._push_to_devices(device_ids, message))
 
     @staticmethod
