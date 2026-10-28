@@ -12,10 +12,10 @@ from django.db import connection, transaction
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from api.serializers import (UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
-                             CreditTransactionSerializer,
+                             CreditTransactionSerializer, NotificationSerializer,
                              BacktestRequestSerializer, StrategyRequestSerializer)
 from api import credits
-from api.models import (Strategy, PushDevice, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
+from api.models import (Strategy, Notification, PushDevice, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
                         RevenueCatConfirmation)
 from api.push_sweep import backlog as push_backlog
 from api.services.auth_service import AuthService
@@ -210,6 +210,37 @@ class CreditHistoryView(APIView):
         page = page[:limit]
         return Response({
             "results": CreditTransactionSerializer(page, many=True).data,
+            "next_before": page[-1].id if has_more else None,
+        }, status=status.HTTP_200_OK)
+
+
+class NotificationHistoryView(APIView):
+    """The signed-in user's own signal notifications, newest first, a page at a time (same paging as credit history).
+
+    `?limit=` (1 to 100, default 50) sizes the page; pass the previous response's `next_before` as `?before=`.
+    """
+    authentication_classes = [JWTAuthentication, ]
+    permission_classes = [IsAuthenticated, ]
+    DEFAULT_LIMIT = 50
+    MAX_LIMIT = 100
+
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get("limit", self.DEFAULT_LIMIT))
+            before = request.query_params.get("before")
+            before = int(before) if before is not None else None
+        except ValueError:
+            return Response({"detail": "limit and before must be whole numbers"}, status=status.HTTP_400_BAD_REQUEST)
+        limit = max(1, min(limit, self.MAX_LIMIT))
+
+        rows = Notification.objects.filter(user=request.user).select_related("trade").order_by("-id")
+        if before is not None:
+            rows = rows.filter(id__lt=before)
+        page = list(rows[:limit + 1])
+        has_more = len(page) > limit
+        page = page[:limit]
+        return Response({
+            "results": NotificationSerializer(page, many=True).data,
             "next_before": page[-1].id if has_more else None,
         }, status=status.HTTP_200_OK)
 

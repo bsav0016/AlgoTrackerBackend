@@ -1,5 +1,5 @@
 from django.urls import path
-from api.views import (UserRegistrationView, LoginView, LogoutView, BacktestView, StrategyView, DeviceIDView,
+from api.views import (UserRegistrationView, LoginView, LogoutView, BacktestView, StrategyView, DeviceIDView, NotificationHistoryView,
                        AvailableSymbolsAndIntervalsView, PasswordResetRequestView, PasswordResetConfirmView,
                        StripePaymentView,StripePaymentConfirmationView, UserDetailsView, DeleteAccountView,
                        PromoCodeAvailabilityView, RevenueCatCustomerView, RevenueCatConfirmationView, HealthView, CreditHistoryView)
@@ -23,6 +23,7 @@ urlpatterns = [
     path('backtest/', BacktestView.as_view(), name='backtest'),
     path('strategy/', StrategyView.as_view(), name='strategy'),
     path('strategy/<int:pk>/', StrategyView.as_view(), name='strategy-detail'),
+    path('notifications/', NotificationHistoryView.as_view(), name='notifications'),
     path('device-id/', DeviceIDView.as_view(), name='device-id'),
     path('symbols-and-intervals/', AvailableSymbolsAndIntervalsView.as_view(), name='symbols-and-intervals'),
     path('payment-intent/', StripePaymentView.as_view(), name='payment-intent'),
