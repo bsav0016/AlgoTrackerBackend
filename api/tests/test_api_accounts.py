@@ -118,6 +118,34 @@ class LoginTests(APITestCase):
         refreshed = self.client.post("/api/token/refresh/", {"refresh": login["refresh_token"]}, format="json")
         self.assertEqual(refreshed.status_code, status.HTTP_401_UNAUTHORIZED)
 
+    def test_logging_out_cannot_revoke_another_accounts_refresh_token(self):
+        make_user(username="bob", email="bob@example.com")
+        bob_login = self.client.post("/api/login/", {"username": "bob", "password": "S3cure-pass!"},
+                                     format="json").data
+        alice = self.client.post("/api/login/", {"username": "alice", "password": "S3cure-pass!"},
+                                 format="json").data
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {alice['access_token']}")
+        response = self.client.post("/api/logout/", {"refresh": bob_login["refresh_token"]}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        still_valid = self.client.post("/api/token/refresh/", {"refresh": bob_login["refresh_token"]}, format="json")
+        self.assertEqual(still_valid.status_code, status.HTTP_200_OK)
+
+    def test_logout_without_a_refresh_token_is_a_400_not_a_crash(self):
+        login = self.client.post("/api/login/", {"username": "alice", "password": "S3cure-pass!"},
+                                 format="json").data
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login['access_token']}")
+        self.assertEqual(self.client.post("/api/logout/", {}, format="json").status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_an_unexpected_logout_error_does_not_leak_its_message(self):
+        login = self.client.post("/api/login/", {"username": "alice", "password": "S3cure-pass!"},
+                                 format="json").data
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login['access_token']}")
+        with mock.patch("api.views.BlacklistedToken.objects.get_or_create",
+                        side_effect=RuntimeError("db password is hunter2")):
+            response = self.client.post("/api/logout/", {"refresh": login["refresh_token"]}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertNotIn("hunter2", str(response.data))
+
 
 class MonthlyCreditsTests(APITestCase):
     def test_reset_date_in_the_past_resets_monthly_credits_and_expires_the_unused_ones(self):

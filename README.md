@@ -175,9 +175,8 @@ The production server is currently paused. When it is brought back up:
 - Live signals look at the last 500 candles and backtests at up to 5000, so recursive indicators (EMA, MACD, ADX) can differ slightly between the two on long histories. A strategy with no sell signal buys and holds. Windows are capped at 500.
 - Pushes are sent after the trade commits. If the worker dies between the commit and queueing the send job, or while a retry is waiting, the delivery rows stay `pending` and the sweeper re-queues them within a minute or two, so that notification is late rather than lost. Expo receipts are checked 15 minutes to 24 hours after sending; a receipt Expo never produces leaves the delivery `sent`.
 - Deploys are manual; CI only runs checks and tests.
-- Views, the Redis price loader and settings log through Python's `logging`; the websocket client and the Expo push client still use `print`, so their output is not leveled or routed by the logging config.
+- Views, the Redis price loader and settings log through Python's `logging`; the websocket client still uses `print`, so their output is not leveled or routed by the logging config.
 - `requirements.txt` pins direct dependencies only, so transitive versions can still drift between builds.
-- RevenueCat webhook deliveries are not de-duplicated: a processed transaction is deleted, so a retried delivery could credit twice (see the expected-failure test in `api/tests/test_api_payments.py`).
 - Prices come from a third-party feed (TwelveData); symbols are limited to the configured `SYMBOLS` list.
 - Backtests are simulations on historical data and do not model fees or slippage.
 
