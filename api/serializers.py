@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from django.contrib.auth import authenticate
-from api.models import CreditTransaction, CustomUser, Strategy, Trade
+from api.models import CreditTransaction, CustomUser, Notification, Strategy, Trade
 from django.conf import settings
 import math
 
@@ -166,3 +166,14 @@ class StrategyRequestSerializer(serializers.Serializer):
         if not any(signal["buy_signal"] for signal in signals):
             raise serializers.ValidationError("A strategy needs at least one buy signal")
         return signals
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    """One signal the user was notified about. `strategy_id` and `trade_id` are what a tap on the push opens."""
+    trade_id = serializers.IntegerField(read_only=True)
+    price = serializers.DecimalField(source='trade.price', max_digits=20, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = ['id', 'created_at', 'kind', 'message', 'strategy_id', 'trade_id', 'price']
+        read_only_fields = fields
