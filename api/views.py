@@ -134,14 +134,16 @@ class LogoutView(APIView):
                     _, _ = BlacklistedToken.objects.get_or_create(token=token)
                 return Response({"message": "All refresh tokens blacklisted"})
             refresh_token = request.data.get('refresh')
-            outstanding_token = OutstandingToken.objects.get(token=refresh_token)
+            # Only the caller's own refresh tokens: knowing someone else's token must not let you revoke it.
+            outstanding_token = OutstandingToken.objects.get(token=refresh_token, user=request.user)
             BlacklistedToken.objects.get_or_create(token=outstanding_token)
             return Response({"message": "Logout completed"}, status=status.HTTP_200_OK)
 
         except ObjectDoesNotExist:
             return Response({"detail": "Token does not exist"}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({"detail": "Error: " + str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception:
+            logger.exception("Logout failed")  # the cause stays in the log, not in the response
+            return Response({"detail": "Logout failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class DeleteAccountView(APIView):
