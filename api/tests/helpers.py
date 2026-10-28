@@ -1,5 +1,7 @@
 """Shared fakes for the test suite. Nothing here talks to a real service."""
 import datetime
+import json
+from unittest import mock
 
 
 class FakeResponse:
@@ -12,6 +14,9 @@ class FakeResponse:
 
     def json(self):
         return self._body
+
+    def raise_for_status(self):
+        pass
 
 
 def twelve_data_values(first_date, closes):
@@ -85,3 +90,41 @@ def ledger():
     user starts with."""
     from api.models import CreditTransaction
     return CreditTransaction.objects.exclude(idempotency_key__startswith="opening:")
+
+
+class FakeExpo:
+    """Stands in for Expo's push API at the HTTP edge, so the real client, batching and ticket parsing run.
+
+    `sent` records `(token, body)` for each message Expo accepted a request for; `payloads` the matching `data`.
+    `errors` maps a token to the ticket error Expo should answer with (for example `DeviceNotRegistered`);
+    `fail_request` makes the whole request fail like a dropped connection.
+    """
+
+    def __init__(self):
+        self.sent = []
+        self.payloads = []
+        self.requests = 0
+        self.errors = {}
+        self.fail_request = None
+
+    def install(self, testcase):
+        from api.services import notification_service
+        patcher = mock.patch.object(notification_service.session, "post", side_effect=self.post)
+        patcher.start()
+        testcase.addCleanup(patcher.stop)
+        return self
+
+    def post(self, url, data=None, timeout=None):
+        self.requests += 1
+        if self.fail_request is not None:
+            raise self.fail_request
+        tickets = []
+        for message in json.loads(data):
+            error = self.errors.get(message["to"])
+            if error:
+                tickets.append({"status": "error", "message": error, "details": {"error": error}})
+            else:
+                self.sent.append((message["to"], message["body"]))
+                self.payloads.append(message.get("data"))
+                tickets.append({"status": "ok", "id": f"ticket-{len(self.sent)}"})
+        return FakeResponse(200, {"data": tickets})

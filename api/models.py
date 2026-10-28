@@ -8,7 +8,6 @@ from api.indicators.signal import Signal
 from typing import List
 from api.services.signal_service import SignalService
 from api.services.backtest_service import BacktestService
-from api.services.notification_service import NotificationService
 from decimal import Decimal
 from django.utils import timezone
 from datetime import timedelta
@@ -207,22 +206,12 @@ class Strategy(models.Model):
 
         if current_close["buy"] and not current_close["sell"] and self.position < 2:
             self.position = 3
-            self.send_notifications(f"{self.title} triggered a buy signal!")
-            trade = Trade(
-                strategy=self,
-                price=current_close["close"],
-                is_buy=True,
-            )
-            trade.save()
+            trade = Trade.objects.create(strategy=self, price=current_close["close"], is_buy=True)
+            self.send_notifications(trade, f"{self.title} triggered a buy signal!")
         elif current_close["sell"] and not current_close["buy"] and self.position >= 2:
             self.position = 0
-            self.send_notifications(f"{self.title} triggered a sell signal!")
-            trade = Trade(
-                strategy=self,
-                price=current_close["close"],
-                is_buy=False,
-            )
-            trade.save()
+            trade = Trade.objects.create(strategy=self, price=current_close["close"], is_buy=False)
+            self.send_notifications(trade, f"{self.title} triggered a sell signal!")
         elif self.position < 2:
             self.position = 1
         else:
@@ -237,23 +226,21 @@ class Strategy(models.Model):
         self.save(update_fields=["position", "strategy_return", "asset_return", "charge_user_date", "last_processed_ts"])
         logger.info("Finished processing data")
 
-    def send_notifications(self, message):
-        """Push `message` to the user's devices once the surrounding transaction commits.
+    def send_notifications(self, trade, message):
+        """Record that `trade` owes the user a push, in the same transaction as the trade.
 
-        Sending straight away would hold the strategy's row lock during network calls, and a later failure
-        would roll back the trade while the push had already gone out (a retry would then notify twice). If the
-        transaction rolls back, nothing is sent. A failure for one device does not stop the others.
+        The Notification and one PushDelivery per active device are written now, so a worker that dies before
+        sending loses nothing: the rows are still there to send. The send job is queued once the transaction
+        commits; if the transaction rolls back the rows go with it and nothing is sent.
         """
-        device_ids = list(self.user.push_devices.filter(active=True).values_list("token", flat=True))
-        transaction.on_commit(lambda: self._push_to_devices(device_ids, message))
-
-    @staticmethod
-    def _push_to_devices(device_ids, message):
-        for device_id in device_ids:
-            try:
-                NotificationService.send_push_message(device_id, message)
-            except Exception:
-                logger.exception("Push notification failed")
+        from api.tasks import send_notification_task
+        notification = Notification.objects.create(
+            user_id=self.user_id, strategy=self, trade=trade, message=message,
+            kind=Notification.BUY if trade.is_buy else Notification.SELL)
+        devices = list(self.user.push_devices.filter(active=True))
+        PushDelivery.objects.bulk_create([PushDelivery(notification=notification, device=d) for d in devices])
+        if devices:
+            transaction.on_commit(lambda: send_notification_task.delay(notification.pk))
 
     def charge_user(self, amount):
         """Charge one month of this subscription. If the user cannot pay, the strategy is deleted and nothing is charged.
@@ -285,6 +272,41 @@ class Trade(models.Model):
     date = models.DateTimeField(default=timezone.now)
     price = models.DecimalField(default=0, max_digits=20, decimal_places=2)
     is_buy = models.BooleanField()
+
+
+class Notification(models.Model):
+    """A signal the user is owed a push for. Written in the transaction that records the trade."""
+    BUY = "buy"
+    SELL = "sell"
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="notifications")
+    strategy = models.ForeignKey(Strategy, on_delete=models.SET_NULL, null=True, related_name="notifications")
+    trade = models.OneToOneField(Trade, on_delete=models.CASCADE, related_name="notification")
+    kind = models.CharField(max_length=10, choices=[(BUY, "Buy"), (SELL, "Sell")])
+    message = models.CharField(max_length=255)
+    created_at = models.DateTimeField(default=timezone.now)
+
+
+class PushDelivery(models.Model):
+    """One notification going to one device. The job that sends it can run any number of times: only rows still
+    `pending` and due are sent, and a row never leaves `sent` or a final state."""
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    DEAD_TOKEN = "dead_token"
+    STATUSES = [(PENDING, "Pending"), (SENT, "Sent"), (FAILED, "Failed"), (DEAD_TOKEN, "Dead token")]
+
+    notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name="deliveries")
+    device = models.ForeignKey(PushDevice, on_delete=models.CASCADE, related_name="deliveries")
+    status = models.CharField(max_length=12, choices=STATUSES, default=PENDING)
+    ticket_id = models.CharField(max_length=100, blank=True, default="")
+    attempts = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    last_error = models.CharField(max_length=255, blank=True, default="")
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["notification", "device"], name="one_delivery_per_device")]
+        indexes = [models.Index(fields=["status", "next_attempt_at"])]
 
 
 #Not using it now but may use it later?
