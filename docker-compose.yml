@@ -51,7 +51,7 @@ services:
   worker-tasks:
     build: .
     restart: unless-stopped
-    command: python manage.py rqworker default
+    command: python manage.py rqworker default --with-scheduler
     env_file: .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-algotracker}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-algotracker}

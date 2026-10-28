@@ -5,9 +5,8 @@ from django.test import TestCase
 
 from api.models import PushDevice, Strategy, Trade
 from api.redis_manager import RedisManager
-from api.services.notification_service import NotificationService
-from api.tasks import process_strategy_task
-from api.tests.helpers import FakeRedis
+from api.tasks import process_strategy_task, send_notification_task
+from api.tests.helpers import FakeExpo, FakeRedis
 from api.tests.test_strategy import make_strategy, make_user
 
 SYMBOL, INTERVAL = "AAPL", "1day"
@@ -32,8 +31,9 @@ class LivePipelineCase(TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-        patcher = mock.patch.object(NotificationService, "send_push_message")
-        self.push = patcher.start()
+        self.expo = FakeExpo().install(self)
+        patcher = mock.patch.object(send_notification_task, "delay", side_effect=send_notification_task)
+        patcher.start()
         self.addCleanup(patcher.stop)
 
         self.user = make_user()
@@ -82,7 +82,7 @@ class LivePipelineTests(LivePipelineCase):
         trade = Trade.objects.get()
         self.assertTrue(trade.is_buy)
         self.assertEqual(float(trade.price), 12.5)
-        self.push.assert_called_once_with("ExponentPushToken[a]", "Momentum triggered a buy signal!")
+        self.assertEqual(self.expo.sent, [("ExponentPushToken[a]", "Momentum triggered a buy signal!")])
 
     def test_falling_prices_trigger_a_sell_through_the_whole_pipeline(self):
         self.store([12.5, 11.5])
@@ -95,7 +95,7 @@ class LivePipelineTests(LivePipelineCase):
         trade = Trade.objects.get()
         self.assertFalse(trade.is_buy)
         self.assertEqual(float(trade.price), 10.5)
-        self.push.assert_called_once_with("ExponentPushToken[a]", "Momentum triggered a sell signal!")
+        self.assertEqual(self.expo.sent, [("ExponentPushToken[a]", "Momentum triggered a sell signal!")])
 
     def test_asset_return_is_the_change_between_the_last_two_candles(self):
         self.store([10.5, 11.5])
@@ -128,7 +128,7 @@ class IdempotentJobTests(LivePipelineCase):
         strategy.refresh_from_db()
         self.assertEqual(strategy.position, 3)
         self.assertEqual(Trade.objects.count(), 1)
-        self.push.assert_called_once()
+        self.assertEqual(len(self.expo.sent), 1)
         self.assertEqual(strategy.last_processed_ts, 2 * DAY)
         self.assertAlmostEqual(float(strategy.asset_return), 12.5 / 11.5, places=4)
 
@@ -144,7 +144,7 @@ class IdempotentJobTests(LivePipelineCase):
         self.assertEqual(strategy.last_processed_ts, 3 * DAY)
         self.assertEqual(Trade.objects.count(), 1)
         self.assertEqual(float(Trade.objects.get().price), 13.5)
-        self.push.assert_called_once()
+        self.assertEqual(len(self.expo.sent), 1)
 
     def test_a_job_only_sees_candles_up_to_its_own_timestamp(self):
         strategy = self.history_then_subscribe([10.5, 11.5], position=1)
@@ -189,7 +189,7 @@ class IdempotentJobTests(LivePipelineCase):
         self.run_job(*job)
 
         self.assertEqual(Strategy.objects.count(), 0)
-        self.push.assert_not_called()
+        self.assertEqual(self.expo.sent, [])
 
     def test_the_first_candle_alone_is_skipped_without_error(self):
         strategy = make_strategy(self.user, position=1)
