@@ -19,6 +19,9 @@ from api.models import (Strategy, Notification, PushDevice, CustomUser, CreditTr
                         RevenueCatConfirmation)
 from api.push_sweep import backlog as push_backlog
 from api.services.auth_service import AuthService
+from api.throttles import (LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
+                           PasswordResetAddressThrottle, PasswordResetEmailThrottle,
+                           PasswordResetConfirmAddressThrottle, PasswordResetConfirmUsernameThrottle)
 from api.services.backtest_service import BacktestService
 from api.indicators.signal import Signal
 from rest_framework_simplejwt.authentication import JWTAuthentication
@@ -59,6 +62,7 @@ def finite_or_zero(value):
 class UserRegistrationView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny, ]
+    throttle_classes = [RegisterAddressThrottle]
 
     def post(self, request, format=None):
         try:
@@ -106,6 +110,7 @@ class PromoCodeAvailabilityView(APIView):
 class LoginView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny, ]
+    throttle_classes = [LoginAddressThrottle, LoginUsernameThrottle]
 
     def post(self, request, format=None):
         serializer = LoginSerializer(data=request.data)
@@ -129,9 +134,7 @@ class LogoutView(APIView):
     def post(self, request, *args, **kwargs):
         try:
             if self.request.data.get('all'):
-                token: OutstandingToken
-                for token in OutstandingToken.objects.filter(user=request.user):
-                    _, _ = BlacklistedToken.objects.get_or_create(token=token)
+                AuthService.revoke_all_sessions(request.user)
                 return Response({"message": "All refresh tokens blacklisted"})
             refresh_token = request.data.get('refresh')
             # Only the caller's own refresh tokens: knowing someone else's token must not let you revoke it.
@@ -487,6 +490,7 @@ class StrategyView(APIView):
 class PasswordResetRequestView(APIView):
     """Generate OTP and send it via email for password reset"""
     permission_classes = [AllowAny, ]
+    throttle_classes = [PasswordResetAddressThrottle, PasswordResetEmailThrottle]
 
     def post(self, request):
         email = request.data.get("email")
@@ -516,6 +520,7 @@ class PasswordResetRequestView(APIView):
 class PasswordResetConfirmView(APIView):
     """Verify OTP and reset password"""
     permission_classes = [AllowAny, ]
+    throttle_classes = [PasswordResetConfirmAddressThrottle, PasswordResetConfirmUsernameThrottle]
 
     def post(self, request):
         username = request.data.get("username")
@@ -537,6 +542,8 @@ class PasswordResetConfirmView(APIView):
 
             user.set_password(new_password)
             user.save()
+            # Whoever held the old password (or a stolen session) must not stay signed in after a reset.
+            AuthService.revoke_all_sessions(user)
 
             RedisManager.delete_otp(user.email)
             return Response({"message": "Password reset successful"}, status=status.HTTP_200_OK)

@@ -162,7 +162,21 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-    ]
+    ],
+    # Caddy is the one proxy in front of gunicorn and nothing else can reach it, so the client address is the
+    # last entry of X-Forwarded-For. Without this every request would look like it came from Caddy.
+    'NUM_PROXIES': 1,
+}
+
+# Limits on the endpoints that take credentials or send email (see api/throttles.py).
+AUTH_THROTTLE_RATES = {
+    'login_address': '20/min',
+    'login_username': '20/hour',
+    'register_address': '10/hour',
+    'reset_address': '10/hour',
+    'reset_email': '3/hour',
+    'reset_confirm_address': '20/hour',
+    'reset_confirm_username': '10/hour',
 }
 
 
@@ -196,6 +210,10 @@ CACHES = {
         }
     }
 }
+
+# The rate limits count in their own cache alias (same Redis), so tests can swap it for an in-process one
+# while the default alias stays the Redis connection the rest of the code needs.
+CACHES["throttle"] = dict(CACHES["default"])
 
 RQ_DB = 0
 if parsed_url.path:

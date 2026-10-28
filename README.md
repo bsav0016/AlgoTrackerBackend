@@ -166,6 +166,8 @@ The production server is currently paused. When it is brought back up:
 - **Separate websocket worker.** The price feed is a long-lived connection, so it runs outside the request/response API and reconnects on its own after errors.
 - **Pricing is configuration.** Backtest cost, iterations, monthly credits, symbols and intervals come from environment variables and are served to the app.
 - **Password-reset codes are secrets.** A code is six digits from Python's `secrets` module, kept in Redis for 10 minutes, single use, never printed or logged (a test checks this), and thrown away after 5 wrong guesses (HTTP 429), so the code cannot be brute-forced; the user then requests a new one.
+- **Rate limits on credentials and email.** Login (per address and per username), sign-up, and both password-reset steps are limited in `api/throttles.py` (rates in `AUTH_THROTTLE_RATES`), counted in Redis, and answer HTTP 429. The client address is the last `X-Forwarded-For` entry, which is the one Caddy adds (`NUM_PROXIES = 1`); `web` is not published, so nothing reaches it except through Caddy. If Redis is unreachable the limits are skipped and the failure is logged rather than blocking sign-in.
+- **A password reset ends every session.** All of the user's refresh tokens are blacklisted when a reset completes.
 - **Two payment paths** (Stripe and RevenueCat) both end in the same credit balance.
 - **Webhooks are authenticated.** Stripe events are verified with the Stripe signature. The RevenueCat webhook has no signature, so it requires a shared secret in the `Authorization` header (`REVENUECAT_WEBHOOK_AUTH`), compared in constant time. With no secret configured it rejects every request, so a missing setting can never allow free credits.
 
