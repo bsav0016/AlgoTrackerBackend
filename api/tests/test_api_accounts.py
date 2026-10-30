@@ -118,6 +118,38 @@ class LoginTests(APITestCase):
         refreshed = self.client.post("/api/token/refresh/", {"refresh": login["refresh_token"]}, format="json")
         self.assertEqual(refreshed.status_code, status.HTTP_401_UNAUTHORIZED)
 
+    def login_tokens(self):
+        return self.client.post("/api/login/", {"username": "alice", "password": "S3cure-pass!"},
+                                format="json").data
+
+    def renew(self, refresh):
+        return self.client.post("/api/token/refresh/", {"refresh": refresh}, format="json")
+
+    def test_renewing_returns_a_new_refresh_token_and_retires_the_old_one(self):
+        login = self.login_tokens()
+        renewed = self.renew(login["refresh_token"])
+        self.assertEqual(renewed.status_code, status.HTTP_200_OK)
+        self.assertTrue(renewed.data["access"])
+        self.assertTrue(renewed.data["refresh"])
+        self.assertNotEqual(renewed.data["refresh"], login["refresh_token"])
+        self.assertEqual(self.renew(login["refresh_token"]).status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_the_rotated_refresh_token_keeps_working_down_the_chain(self):
+        refresh = self.login_tokens()["refresh_token"]
+        for _ in range(3):
+            renewed = self.renew(refresh)
+            self.assertEqual(renewed.status_code, status.HTTP_200_OK)
+            refresh = renewed.data["refresh"]
+
+    def test_a_rotated_refresh_token_can_be_logged_out(self):
+        login = self.login_tokens()
+        rotated = self.renew(login["refresh_token"]).data
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {rotated['access']}")
+        response = self.client.post("/api/logout/", {"refresh": rotated["refresh"]}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.client.credentials()
+        self.assertEqual(self.renew(rotated["refresh"]).status_code, status.HTTP_401_UNAUTHORIZED)
+
     def test_logging_out_cannot_revoke_another_accounts_refresh_token(self):
         make_user(username="bob", email="bob@example.com")
         bob_login = self.client.post("/api/login/", {"username": "bob", "password": "S3cure-pass!"},

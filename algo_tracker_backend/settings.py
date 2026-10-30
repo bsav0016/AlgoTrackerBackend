@@ -184,7 +184,10 @@ AUTH_THROTTLE_RATES = {
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
-    'ROTATE_REFRESH_TOKENS': False,
+    # Each renewal returns a new refresh token and retires the old one, so a stolen refresh token stops
+    # working as soon as the real app renews. The app saves the new token (features/auth/tokenRenewal.ts).
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
 }
 
 
