@@ -51,7 +51,6 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     account_credits = models.IntegerField(default=0, null=False, blank=False)
     monthly_credits = models.IntegerField(default=MONTHLY_CREDITS, null=False, blank=False)
     reset_monthly_credits = models.DateTimeField(default=get_thirty_days_away, null=False, blank=False)
-    device_ids = models.JSONField(default=list, blank=True)
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
