@@ -14,7 +14,6 @@ numpy==2.5.4
 django-redis==5.4.0
 asgiref==3.13.0
 matplotlib==3.11.2
-django-push-notifications==3.3.0
 firebase_admin==6.9.0
 stripe==11.6.0
 exponent_server_sdk==2.2.0
