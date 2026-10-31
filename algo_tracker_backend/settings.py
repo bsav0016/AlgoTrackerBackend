@@ -179,6 +179,7 @@ AUTH_THROTTLE_RATES = {
     'shared_view_address': '60/min',
     'shared_card_address': '20/min',
     'leaderboard_name_address': '20/hour',
+    'leaderboard_read_address': '60/min',
 }
 
 

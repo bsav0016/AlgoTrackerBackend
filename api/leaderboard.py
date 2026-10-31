@@ -7,6 +7,7 @@ import re
 
 from django.db import IntegrityError, transaction
 
+from api import leaderboard_read
 from api.models import CustomUser
 
 MIN_LENGTH = 3
@@ -51,6 +52,7 @@ def join(user, raw_name):
     except IntegrityError:  # someone took the name between the check and the write
         raise InvalidDisplayName("That name is taken")
     user.leaderboard_name = name
+    leaderboard_read.bump_version()
     return name
 
 
@@ -61,3 +63,4 @@ def leave(user):
         CustomUser.objects.filter(pk=user.pk).update(leaderboard_name=None)
         leaderboard_job.remove_user(user.pk)
     user.leaderboard_name = None
+    leaderboard_read.bump_version()
