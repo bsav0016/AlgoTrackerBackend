@@ -299,6 +299,13 @@ STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', default='')
 # TODO(go-live): set this, and update the RevenueCat webhook, before the server is live again (see api/views.py).
 REVENUECAT_WEBHOOK_AUTH = os.getenv('REVENUECAT_WEBHOOK_AUTH', default='')
 
+# Share links (`/s/<id>`). PUBLIC_BASE_URL is the address people see in a link, e.g. https://api.example.com; empty
+# means use the address the request came in on. SHARE_APP_SCHEME is the app's URL scheme for "Open in AlgoTracker".
+PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL', default='').strip()
+SHARE_APP_SCHEME = os.getenv('SHARE_APP_SCHEME', default='algotracker').strip()
+IOS_APP_STORE_URL = os.getenv('IOS_APP_STORE_URL', default='').strip()
+ANDROID_PLAY_STORE_URL = os.getenv('ANDROID_PLAY_STORE_URL', default='').strip()
+
 
 #Promo codes
 promo_code_str = os.getenv('PROMO_CODES', default='')
