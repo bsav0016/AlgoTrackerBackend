@@ -131,7 +131,7 @@ class RedisManager:
 
         if not enqueue_jobs:
             return
-        strategy_ids = await sync_to_async(list)(Strategy.objects.filter(symbol=symbol, interval=interval).values_list('id', flat=True))
+        strategy_ids = await sync_to_async(list)(Strategy.objects.filter(symbol=symbol, interval=interval, active=True).values_list('id', flat=True))
         if strategy_ids:
             for strategy_id in strategy_ids:
                 process_strategy_task.delay(strategy_id, symbol, interval, timestamp)

@@ -1,9 +1,11 @@
 from django.core.cache import caches
+from django.utils import timezone
 from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from api.models import Strategy, StrategyShare
+from api.models import CreditTransaction, Strategy, StrategyShare, Trade
+from api.tests.test_live_pipeline import DAY, INTERVAL, SYMBOL, LivePipelineCase
 from api.tests.test_strategy import make_strategy, make_user
 
 PUBLIC_FIELDS = {"title", "symbol", "interval", "buy_signals", "sell_signals", "strategy_return", "asset_return"}
@@ -125,3 +127,115 @@ class PublicViewTests(ShareTestCase):
         with override_settings(AUTH_THROTTLE_RATES={"shared_view_address": "2/min"}):
             statuses = [self.client.get(f"/api/shared/guess{i}/").status_code for i in range(4)]
         self.assertEqual(statuses, [404, 404, 429, 429])
+
+
+class CloneTests(ShareTestCase):
+    def setUp(self):
+        super().setUp()
+        self.link = self.share()
+        self.copier = make_user(username="copier", email="c@example.com")
+
+    def clone(self, link=None, user=None):
+        self.client.force_authenticate(user or self.copier)
+        return self.client.post(f"/api/shared/{link or self.link}/clone/")
+
+    def test_a_clone_is_an_inactive_draft_with_the_same_rules(self):
+        response = self.clone()
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        draft = Strategy.objects.get(pk=response.data["id"])
+        self.assertEqual(draft.user, self.copier)
+        self.assertFalse(draft.active)
+        self.assertEqual(draft.cloned_from, self.strategy)
+        self.assertEqual((draft.title, draft.symbol, draft.interval), ("Momentum", "AAPL", "1day"))
+        self.assertEqual(draft.buy_signals, self.strategy.buy_signals)
+        self.assertEqual(draft.sell_signals, self.strategy.sell_signals)
+
+    def test_a_clone_starts_clean_and_leaves_the_original_alone(self):
+        Strategy.objects.filter(pk=self.strategy.pk).update(strategy_return=3, asset_return=2, position=2)
+        draft = Strategy.objects.get(pk=self.clone().data["id"])
+        self.assertEqual((draft.strategy_return, draft.asset_return, draft.position), (1, 1, 1))
+        self.assertFalse(draft.trades.exists())
+        self.strategy.refresh_from_db()
+        self.assertEqual(self.strategy.user, self.owner)
+        self.assertTrue(self.strategy.active)
+
+    def test_cloning_costs_no_credits(self):
+        before = (self.copier.account_credits, self.copier.monthly_credits)
+        self.clone()
+        self.copier.refresh_from_db()
+        self.assertEqual((self.copier.account_credits, self.copier.monthly_credits), before)
+        self.assertEqual(CreditTransaction.objects.filter(user=self.copier).count(), 1)  # only the opening balance
+
+    def test_signing_in_is_required(self):
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.post(f"/api/shared/{self.link}/clone/").status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_a_revoked_link_cannot_be_cloned(self):
+        self.client.force_authenticate(self.owner)
+        self.client.delete(self.share_url())
+        self.assertEqual(self.clone().status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(Strategy.objects.count(), 1)
+
+    def test_the_clone_survives_the_original_being_deleted(self):
+        draft_id = self.clone().data["id"]
+        self.strategy.delete()
+        draft = Strategy.objects.get(pk=draft_id)
+        self.assertIsNone(draft.cloned_from)
+
+
+class ActivateTests(ShareTestCase):
+    def setUp(self):
+        super().setUp()
+        link = self.share()
+        self.copier = make_user(username="copier", email="c@example.com")
+        self.client.force_authenticate(self.copier)
+        self.draft = Strategy.objects.get(pk=self.client.post(f"/api/shared/{link}/clone/").data["id"])
+
+    def test_activating_starts_tracking_with_the_first_charge_30_days_out(self):
+        response = self.client.post(f"/api/strategy/{self.draft.pk}/activate/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.draft.refresh_from_db()
+        self.assertTrue(self.draft.active)
+        days = (self.draft.charge_user_date - timezone.now()).days
+        self.assertIn(days, (29, 30))
+
+    def test_someone_else_cannot_activate_it(self):
+        self.client.force_authenticate(self.owner)
+        self.assertEqual(self.client.post(f"/api/strategy/{self.draft.pk}/activate/").status_code,
+                         status.HTTP_404_NOT_FOUND)
+        self.draft.refresh_from_db()
+        self.assertFalse(self.draft.active)
+
+    def test_activating_twice_changes_nothing_the_second_time(self):
+        self.client.post(f"/api/strategy/{self.draft.pk}/activate/")
+        Strategy.objects.filter(pk=self.draft.pk).update(strategy_return=2)
+        self.client.post(f"/api/strategy/{self.draft.pk}/activate/")
+        self.draft.refresh_from_db()
+        self.assertEqual(self.draft.strategy_return, 2)
+
+
+class DraftsAreNotTrackedTests(LivePipelineCase):
+    def test_a_draft_gets_no_job_no_trade_and_no_push(self):
+        self.store([10.5, 11.5])
+        draft = make_strategy(self.user, position=1, active=False)
+
+        self.store([12.5], first_timestamp=2 * DAY)
+
+        self.assertEqual(Trade.objects.count(), 0)
+        self.assertEqual(self.expo.sent, [])
+        draft.refresh_from_db()
+        self.assertEqual(draft.position, 1)
+
+    def test_a_job_already_queued_for_a_draft_does_nothing(self):
+        self.store([10.5, 11.5])
+        draft = make_strategy(self.user, position=1, active=False)
+        self.store([12.5], first_timestamp=2 * DAY)
+        self.run_job(draft.pk, SYMBOL, INTERVAL, 2 * DAY)
+        self.assertEqual(Trade.objects.count(), 0)
+
+    def test_activating_a_draft_makes_it_trade(self):
+        self.store([10.5, 11.5])
+        draft = make_strategy(self.user, position=1, active=False)
+        draft.activate()
+        self.store([12.5], first_timestamp=2 * DAY)
+        self.assertTrue(Trade.objects.get().is_buy)

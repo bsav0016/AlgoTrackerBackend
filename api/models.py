@@ -122,7 +122,8 @@ class Strategy(models.Model):
     strategy_return = models.DecimalField(default=1, max_digits=10, decimal_places=5)
     asset_return = models.DecimalField(default=1, max_digits=10, decimal_places=5)
     charge_user_date = models.DateTimeField(default=get_thirty_days_away)
-    active = models.BooleanField(default=True)
+    active = models.BooleanField(default=True)  # False for a draft (a copy of a shared strategy) that is not tracked or billed yet
+    cloned_from = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="clones")
     last_processed_ts = models.BigIntegerField(null=True, blank=True)  # timestamp of the newest candle already evaluated
 
     def add_signals(self, signals: List[Signal]):
@@ -225,6 +226,23 @@ class Strategy(models.Model):
             self.last_processed_ts = ts
         self.save(update_fields=["position", "strategy_return", "asset_return", "charge_user_date", "last_processed_ts"])
         logger.info("Finished processing data")
+
+    def clone_for(self, user):
+        """A draft copy for `user`: the same rules, symbol, interval and title, not tracked or billed until activated."""
+        return Strategy.objects.create(
+            user=user, title=self.title, symbol=self.symbol, interval=self.interval,
+            buy_signals=self.buy_signals, sell_signals=self.sell_signals, active=False, cloned_from=self)
+
+    def activate(self):
+        """Start tracking a draft now: fresh returns and position, and the first monthly charge 30 days away."""
+        self.active = True
+        self.position = 1
+        self.strategy_return = 1
+        self.asset_return = 1
+        self.last_processed_ts = None
+        self.charge_user_date = get_thirty_days_away()
+        self.save(update_fields=["active", "position", "strategy_return", "asset_return", "last_processed_ts",
+                                 "charge_user_date"])
 
     def send_notifications(self, trade, message):
         """Record that `trade` owes the user a push, in the same transaction as the trade.
