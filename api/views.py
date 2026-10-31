@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.conf import settings
+from django.http import HttpResponse
 from django.db import connection, transaction
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -19,10 +20,11 @@ from api.models import (Strategy, StrategyShare, Notification, PushDevice, Custo
                         RevenueCatConfirmation)
 from api.push_sweep import backlog as push_backlog
 from api.services.auth_service import AuthService
-from api.throttles import (SharedStrategyAddressThrottle, LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
+from api.throttles import (SharedStrategyAddressThrottle, SharedCardAddressThrottle, LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
                            PasswordResetAddressThrottle, PasswordResetEmailThrottle,
                            PasswordResetConfirmAddressThrottle, PasswordResetConfirmUsernameThrottle)
 from api.services.backtest_service import BacktestService
+from api.services.card_service import render_card
 from api.indicators.signal import Signal
 from rest_framework_simplejwt.authentication import JWTAuthentication
 import secrets
@@ -525,6 +527,23 @@ class SharedStrategyView(APIView):
         if share is None:
             return Response({"detail": "This link is not shared any more."}, status=status.HTTP_404_NOT_FOUND)
         return Response(SharedStrategySerializer(share.strategy).data)
+
+
+class SharedStrategyCardView(APIView):
+    """The picture card for a shared strategy, used as the link preview. Public; limited per address."""
+    authentication_classes = []
+    permission_classes = [AllowAny, ]
+    throttle_classes = [SharedCardAddressThrottle, ]
+
+    def get(self, request, share_id):
+        share = StrategyShare.objects.select_related("strategy").filter(share_id=share_id).first()
+        if share is None:
+            return Response({"detail": "This link is not shared any more."}, status=status.HTTP_404_NOT_FOUND)
+        strategy = share.strategy
+        image = render_card(strategy, list(strategy.trades.order_by("date", "pk")))
+        response = HttpResponse(image, content_type="image/png")
+        response["Cache-Control"] = "public, max-age=300"
+        return response
 
 
 class SharedStrategyCloneView(APIView):
