@@ -90,20 +90,26 @@ def rank_scores(rows):
     return ranked
 
 
-def best_per_user(strategies):
-    """One strategy per user per group: the highest score, then the older strategy (lower id) on a tie.
-    Returns `{group: [(strategy, score)]}` for the strategies that are eligible."""
-    now = timezone.now()
+def pick_best(candidates):
+    """One candidate per user per group. A candidate is a tuple that starts `(strategy, score, ...)` and is already
+    known to be eligible. The highest score wins, then the older strategy (lower id) on a tie.
+    Returns `{group: [candidate, ...]}`, with both groups always present."""
     best = {}
-    for strategy in strategies:
-        if ineligible_reason(strategy, now) is not None:
-            continue
+    for candidate in candidates:
+        strategy, value = candidate[0], candidate[1]
         key = (group_for(strategy.interval), strategy.user_id)
-        value = score(strategy)
         current = best.get(key)
         if current is None or (value, -strategy.pk) > (current[1], -current[0].pk):
-            best[key] = (strategy, value)
+            best[key] = candidate
     grouped = {group: [] for group in GROUPS}
-    for (group, _), entry in best.items():
-        grouped[group].append(entry)
+    for (group, _), candidate in best.items():
+        grouped[group].append(candidate)
     return grouped
+
+
+def best_per_user(strategies):
+    """`pick_best` for strategies scored on their current returns. Returns `{group: [(strategy, score)]}` for the
+    strategies that are eligible."""
+    now = timezone.now()
+    eligible = [(s, score(s)) for s in strategies if ineligible_reason(s, now) is None]
+    return pick_best(eligible)

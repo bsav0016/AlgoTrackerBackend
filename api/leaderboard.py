@@ -55,7 +55,9 @@ def join(user, raw_name):
 
 
 def leave(user):
-    """Take `user` off the board. Later stages also delete their stored entries here."""
+    """Take `user` off the board and delete everything it holds about them: entries and snapshots."""
+    from api import leaderboard_job
     with transaction.atomic():
         CustomUser.objects.filter(pk=user.pk).update(leaderboard_name=None)
+        leaderboard_job.remove_user(user.pk)
     user.leaderboard_name = None
