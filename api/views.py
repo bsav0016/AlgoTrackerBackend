@@ -15,12 +15,12 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from api.serializers import (SharedStrategySerializer, StrategySerializer, UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
                              CreditTransactionSerializer, NotificationSerializer,
                              BacktestRequestSerializer, StrategyRequestSerializer)
-from api import credits
+from api import credits, leaderboard
 from api.models import (Strategy, StrategyShare, Notification, PushDevice, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
                         RevenueCatConfirmation)
 from api.push_sweep import backlog as push_backlog
 from api.services.auth_service import AuthService
-from api.throttles import (SharedStrategyAddressThrottle, SharedCardAddressThrottle, LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
+from api.throttles import (LeaderboardNameAddressThrottle, SharedStrategyAddressThrottle, SharedCardAddressThrottle, LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
                            PasswordResetAddressThrottle, PasswordResetEmailThrottle,
                            PasswordResetConfirmAddressThrottle, PasswordResetConfirmUsernameThrottle)
 from api.services.backtest_service import BacktestService
@@ -188,6 +188,32 @@ class UserDetailsView(APIView):
         user_data = CustomUserSerializer(user).data
 
         return Response({**user_data}, status=status.HTTP_200_OK)
+
+
+class LeaderboardProfileView(APIView):
+    """The signed-in user's own place on the leaderboard: off by default, on only under a name they choose."""
+    authentication_classes = [JWTAuthentication, ]
+    permission_classes = [IsAuthenticated, ]
+
+    def get_throttles(self):
+        # Only choosing a name is limited; reading and leaving are not.
+        return [LeaderboardNameAddressThrottle()] if self.request.method == "PUT" else []
+
+    def get(self, request):
+        return Response({"display_name": request.user.leaderboard_name})
+
+    def put(self, request):
+        """Join the board, or change the name. Body: `{"display_name": "..."}`."""
+        try:
+            name = leaderboard.join(request.user, request.data.get("display_name"))
+        except leaderboard.InvalidDisplayName as error:
+            return Response({"display_name": [str(error)]}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"display_name": name})
+
+    def delete(self, request):
+        """Leave the board. Safe to repeat."""
+        leaderboard.leave(request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CreditHistoryView(APIView):

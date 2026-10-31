@@ -1,4 +1,5 @@
 from django.db import models, transaction
+from django.db.models.functions import Lower
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.conf import settings
@@ -52,11 +53,19 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     account_credits = models.IntegerField(default=0, null=False, blank=False)
     monthly_credits = models.IntegerField(default=MONTHLY_CREDITS, null=False, blank=False)
     reset_monthly_credits = models.DateTimeField(default=get_thirty_days_away, null=False, blank=False)
+    # The name shown on the public leaderboard. Empty means the user is not on it (the default); see api/leaderboard.py.
+    leaderboard_name = models.CharField(max_length=20, null=True, blank=True, default=None)
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
 
     objects = CustomUserManager()
+
+    class Meta:
+        constraints = [
+            # Two people cannot hold the same board name, however it is capitalised.
+            models.UniqueConstraint(Lower('leaderboard_name'), name='unique_leaderboard_name_ci'),
+        ]
 
     USERNAME_FIELD = 'username'
     REQUIRED_FIELDS = ['email', 'first_name', 'last_name']

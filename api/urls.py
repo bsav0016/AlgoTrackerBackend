@@ -3,7 +3,7 @@ from api.views import (UserRegistrationView, LoginView, LogoutView, BacktestView
                        AvailableSymbolsAndIntervalsView, PasswordResetRequestView, PasswordResetConfirmView,
                        StripePaymentView,StripePaymentConfirmationView, UserDetailsView, DeleteAccountView,
                        PromoCodeAvailabilityView, RevenueCatCustomerView, RevenueCatConfirmationView, HealthView, CreditHistoryView,
-                       StrategyShareView, SharedStrategyView, SharedStrategyCloneView, StrategyActivateView, SharedStrategyCardView)
+                       StrategyShareView, SharedStrategyView, SharedStrategyCloneView, StrategyActivateView, SharedStrategyCardView, LeaderboardProfileView)
 from rest_framework_simplejwt.views import TokenRefreshView
 
 
@@ -29,6 +29,7 @@ urlpatterns = [
     path('shared/<str:share_id>/card.png', SharedStrategyCardView.as_view(), name='shared-strategy-card'),
     path('shared/<str:share_id>/clone/', SharedStrategyCloneView.as_view(), name='shared-strategy-clone'),
     path('strategy/<int:pk>/activate/', StrategyActivateView.as_view(), name='strategy-activate'),
+    path('leaderboard/profile/', LeaderboardProfileView.as_view(), name='leaderboard-profile'),
     path('notifications/', NotificationHistoryView.as_view(), name='notifications'),
     path('device-id/', DeviceIDView.as_view(), name='device-id'),
     path('symbols-and-intervals/', AvailableSymbolsAndIntervalsView.as_view(), name='symbols-and-intervals'),
