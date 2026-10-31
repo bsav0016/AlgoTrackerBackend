@@ -65,6 +65,11 @@ class SharedStrategyAddressThrottle(_ByAddress):
     scope = "shared_view_address"
 
 
+class SharedCardAddressThrottle(_ByAddress):
+    """Drawing a card costs real CPU, so it has a tighter limit than reading the strategy."""
+    scope = "shared_card_address"
+
+
 class PasswordResetAddressThrottle(_ByAddress):
     scope = "reset_address"
 
