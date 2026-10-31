@@ -302,6 +302,58 @@ class StrategyShare(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
 
+class LeaderboardSnapshot(models.Model):
+    """A strategy's cumulative returns at the start of a week (Monday, UTC). A week's result is the change between
+    two snapshots. Only strategies of people on the leaderboard are recorded, and leaving deletes them."""
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="leaderboard_snapshots")
+    strategy = models.ForeignKey(Strategy, on_delete=models.CASCADE, related_name="leaderboard_snapshots")
+    period_start = models.DateField()
+    strategy_return = models.DecimalField(max_digits=10, decimal_places=5)
+    asset_return = models.DecimalField(max_digits=10, decimal_places=5)
+    taken_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["strategy", "period_start"], name="one_snapshot_per_week")]
+
+
+class LeaderboardEntry(models.Model):
+    """One person's place on one board. `kind` is a finished `week` (starting `period_start`) or the current
+    `all_time` board (no `period_start`). The name shown is read live from the user, so a rename shows at once."""
+    WEEK = "week"
+    ALL_TIME = "all_time"
+    KINDS = [(WEEK, "Week"), (ALL_TIME, "All time")]
+
+    kind = models.CharField(max_length=10, choices=KINDS)
+    period_start = models.DateField(null=True, blank=True)
+    group = models.CharField(max_length=20)
+    rank = models.PositiveIntegerField()
+    score = models.DecimalField(max_digits=12, decimal_places=4)  # return over buy-and-hold: 1.10 is 10% better
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="leaderboard_entries")
+    strategy = models.ForeignKey(Strategy, on_delete=models.CASCADE, related_name="leaderboard_entries")
+    strategy_return = models.DecimalField(max_digits=14, decimal_places=5)  # over the board's period
+    asset_return = models.DecimalField(max_digits=14, decimal_places=5)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["kind", "period_start", "group", "user"], name="one_entry_per_user_per_board"),
+            # NULLs never clash in a unique constraint, so the all-time board needs its own.
+            models.UniqueConstraint(fields=["kind", "group", "user"], condition=models.Q(period_start__isnull=True),
+                                    name="one_all_time_entry_per_user_per_group"),
+        ]
+        indexes = [models.Index(fields=["kind", "period_start", "group", "rank"])]
+
+
+class LeaderboardRun(models.Model):
+    """Marks a finished week as published, so the job writes each week's board exactly once."""
+    kind = models.CharField(max_length=10, default=LeaderboardEntry.WEEK)
+    period_start = models.DateField()
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["kind", "period_start"], name="one_run_per_board")]
+
+
 class StockValue(models.Model):
     strategy = models.ForeignKey(Strategy, on_delete=models.CASCADE, related_name="stock_values")
     date = models.DateTimeField(default=timezone.now)
