@@ -18,9 +18,11 @@ from django.contrib import admin
 from django.urls import path
 from django.conf.urls import include
 from rest_framework.authtoken.views import obtain_auth_token
+from api.views import SharePageView
 
 urlpatterns = [
     path('api/', include('api.urls')),
+    path('s/<str:share_id>', SharePageView.as_view(), name='share-page'),
     path('admin/', admin.site.urls),
     path('auth/', obtain_auth_token)
 ]
