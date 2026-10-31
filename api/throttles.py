@@ -65,6 +65,11 @@ class SharedStrategyAddressThrottle(_ByAddress):
     scope = "shared_view_address"
 
 
+class LeaderboardNameAddressThrottle(_ByAddress):
+    """Picking a board name reveals whether a name is taken, so it is limited to stop name-guessing."""
+    scope = "leaderboard_name_address"
+
+
 class SharedCardAddressThrottle(_ByAddress):
     """Drawing a card costs real CPU, so it has a tighter limit than reading the strategy."""
     scope = "shared_card_address"

@@ -178,6 +178,7 @@ AUTH_THROTTLE_RATES = {
     'reset_confirm_username': '10/hour',
     'shared_view_address': '60/min',
     'shared_card_address': '20/min',
+    'leaderboard_name_address': '20/hour',
 }
 
 

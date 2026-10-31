@@ -153,7 +153,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
         model = CustomUser
         fields = [
             'id', 'username', 'first_name', 'last_name', 'email', 'account_credits', 'account_created',
-            'monthly_credits', 'reset_monthly_credits', 'strategies'
+            'monthly_credits', 'reset_monthly_credits', 'leaderboard_name', 'strategies'
         ]
         read_only_fields = ['id', 'account_created', 'is_staff']
 
