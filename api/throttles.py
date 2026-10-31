@@ -70,6 +70,10 @@ class LeaderboardNameAddressThrottle(_ByAddress):
     scope = "leaderboard_name_address"
 
 
+class LeaderboardReadAddressThrottle(_ByAddress):
+    scope = "leaderboard_read_address"
+
+
 class SharedCardAddressThrottle(_ByAddress):
     """Drawing a card costs real CPU, so it has a tighter limit than reading the strategy."""
     scope = "shared_card_address"

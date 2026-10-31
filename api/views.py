@@ -1,3 +1,4 @@
+import datetime
 import hmac
 import logging
 import math
@@ -15,12 +16,12 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from api.serializers import (SharedStrategySerializer, StrategySerializer, UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
                              CreditTransactionSerializer, NotificationSerializer,
                              BacktestRequestSerializer, StrategyRequestSerializer)
-from api import credits, leaderboard
+from api import credits, leaderboard, leaderboard_read
 from api.models import (Strategy, StrategyShare, Notification, PushDevice, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
                         RevenueCatConfirmation)
 from api.push_sweep import backlog as push_backlog
 from api.services.auth_service import AuthService
-from api.throttles import (LeaderboardNameAddressThrottle, SharedStrategyAddressThrottle, SharedCardAddressThrottle, LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
+from api.throttles import (LeaderboardReadAddressThrottle, LeaderboardNameAddressThrottle, SharedStrategyAddressThrottle, SharedCardAddressThrottle, LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
                            PasswordResetAddressThrottle, PasswordResetEmailThrottle,
                            PasswordResetConfirmAddressThrottle, PasswordResetConfirmUsernameThrottle)
 from api.services.backtest_service import BacktestService
@@ -188,6 +189,50 @@ class UserDetailsView(APIView):
         user_data = CustomUserSerializer(user).data
 
         return Response({**user_data}, status=status.HTTP_200_OK)
+
+
+class LeaderboardView(APIView):
+    """One leaderboard: the top entries for a group, and where the signed-in caller stands.
+
+    Query: `kind` (`week` or `all_time`, default `all_time`), `group` (`daily_or_longer` or `intraday`, default
+    `daily_or_longer`), `limit` (1 to 100, default 25), and for a week, `week` (a Monday as YYYY-MM-DD; default the
+    latest finished week). Shows board names, ranks, scores and returns only, never the strategy or its rules.
+    """
+    authentication_classes = [JWTAuthentication, ]
+    permission_classes = [IsAuthenticated, ]
+    throttle_classes = [LeaderboardReadAddressThrottle, ]
+
+    def get(self, request):
+        params = request.query_params
+        kind = params.get("kind", "all_time")
+        group = params.get("group", "daily_or_longer")
+        if kind not in ("week", "all_time"):
+            return Response({"detail": "kind must be week or all_time"}, status=status.HTTP_400_BAD_REQUEST)
+        if group not in leaderboard_read.GROUPS:
+            return Response({"detail": f"group must be one of {', '.join(leaderboard_read.GROUPS)}"},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            limit = int(params.get("limit", leaderboard_read.DEFAULT_LIMIT))
+        except ValueError:
+            return Response({"detail": "limit must be a whole number"}, status=status.HTTP_400_BAD_REQUEST)
+        limit = max(1, min(limit, leaderboard_read.MAX_LIMIT))
+
+        period_start = None
+        if kind == "week":
+            if "week" in params:
+                try:
+                    period_start = datetime.date.fromisoformat(params["week"])
+                except ValueError:
+                    return Response({"detail": "week must be a date like 2026-09-07"},
+                                    status=status.HTTP_400_BAD_REQUEST)
+            else:
+                period_start = leaderboard_read.latest_week()
+
+        data = leaderboard_read.board(kind, period_start, group, limit)
+        data = leaderboard_read.with_viewer(data, request.user)
+        if kind == "week":
+            data["weeks"] = [d.isoformat() for d in leaderboard_read.published_weeks()]
+        return Response(data)
 
 
 class LeaderboardProfileView(APIView):

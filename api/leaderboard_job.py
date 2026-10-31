@@ -22,7 +22,7 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from api import leaderboard_rules as rules
+from api import leaderboard_read, leaderboard_rules as rules
 from api.models import LeaderboardEntry, LeaderboardRun, LeaderboardSnapshot, Strategy
 
 logger = logging.getLogger(__name__)
@@ -112,6 +112,7 @@ def run(now=None):
     snapshots = take_snapshots(boundary)
     weekly = publish_week(boundary - timedelta(days=7), boundary, now)
     all_time = refresh_all_time(now)
+    leaderboard_read.bump_version()
     return snapshots, weekly, all_time
 
 
