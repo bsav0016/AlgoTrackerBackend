@@ -25,6 +25,7 @@ from api.throttles import (SharedStrategyAddressThrottle, SharedCardAddressThrot
                            PasswordResetConfirmAddressThrottle, PasswordResetConfirmUsernameThrottle)
 from api.services.backtest_service import BacktestService
 from api.services.card_service import render_card
+from api.services.share_page import not_shared_page, shared_strategy_page
 from api.indicators.signal import Signal
 from rest_framework_simplejwt.authentication import JWTAuthentication
 import secrets
@@ -527,6 +528,24 @@ class SharedStrategyView(APIView):
         if share is None:
             return Response({"detail": "This link is not shared any more."}, status=status.HTTP_404_NOT_FOUND)
         return Response(SharedStrategySerializer(share.strategy).data)
+
+
+class SharePageView(APIView):
+    """The web page a share link opens: a preview card for messages and social apps, and a way into the app."""
+    authentication_classes = []
+    permission_classes = [AllowAny, ]
+    throttle_classes = [SharedStrategyAddressThrottle, ]
+
+    def get(self, request, share_id):
+        share = StrategyShare.objects.select_related("strategy").filter(share_id=share_id).first()
+        if share is None:
+            html, code = not_shared_page(), status.HTTP_404_NOT_FOUND
+        else:
+            html, code = shared_strategy_page(request, share_id, share.strategy), status.HTTP_200_OK
+        response = HttpResponse(html, content_type="text/html; charset=utf-8", status=code)
+        response["Content-Security-Policy"] = "default-src 'none'; img-src https: http:; style-src 'unsafe-inline'"
+        response["Referrer-Policy"] = "no-referrer"
+        return response
 
 
 class SharedStrategyCardView(APIView):
