@@ -176,6 +176,7 @@ AUTH_THROTTLE_RATES = {
     'reset_email': '3/hour',
     'reset_confirm_address': '20/hour',
     'reset_confirm_username': '10/hour',
+    'shared_view_address': '60/min',
 }
 
 

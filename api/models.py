@@ -12,6 +12,7 @@ from decimal import Decimal
 from django.utils import timezone
 from datetime import timedelta
 import logging
+import secrets
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +256,18 @@ class Strategy(models.Model):
             self.delete()
             return
         self.charge_user_date = timezone.now() + timedelta(days=30)
+
+
+def new_share_id():
+    return secrets.token_urlsafe(16)
+
+
+class StrategyShare(models.Model):
+    """A public link to one strategy. The id is random (128 bits), so a link cannot be guessed; deleting the row
+    revokes it, and sharing again makes a new id. A strategy has at most one live share."""
+    strategy = models.OneToOneField(Strategy, on_delete=models.CASCADE, related_name="share")
+    share_id = models.CharField(max_length=32, unique=True, default=new_share_id, editable=False)
+    created_at = models.DateTimeField(default=timezone.now)
 
 
 class StockValue(models.Model):
