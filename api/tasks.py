@@ -22,7 +22,7 @@ def process_strategy_task(strategy_id, symbol, interval, ts):
 
     with transaction.atomic():
         strategy = Strategy.objects.select_for_update().filter(id=strategy_id).first()
-        if strategy is None:  # deleted (for example, the user could not pay) since the job was queued
+        if strategy is None or not strategy.active:  # deleted (for example, the user could not pay) since the job was queued
             return
         if strategy.last_processed_ts is not None and ts <= strategy.last_processed_ts:
             return

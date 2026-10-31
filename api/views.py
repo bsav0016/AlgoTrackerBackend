@@ -11,7 +11,7 @@ from django.conf import settings
 from django.db import connection, transaction
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from api.serializers import (SharedStrategySerializer, UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
+from api.serializers import (SharedStrategySerializer, StrategySerializer, UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
                              CreditTransactionSerializer, NotificationSerializer,
                              BacktestRequestSerializer, StrategyRequestSerializer)
 from api import credits
@@ -525,6 +525,34 @@ class SharedStrategyView(APIView):
         if share is None:
             return Response({"detail": "This link is not shared any more."}, status=status.HTTP_404_NOT_FOUND)
         return Response(SharedStrategySerializer(share.strategy).data)
+
+
+class SharedStrategyCloneView(APIView):
+    """A signed-in user copies a shared strategy into their own account as an inactive draft."""
+    authentication_classes = [JWTAuthentication, ]
+    permission_classes = [IsAuthenticated, ]
+    throttle_classes = [SharedStrategyAddressThrottle, ]
+
+    def post(self, request, share_id):
+        share = StrategyShare.objects.select_related("strategy").filter(share_id=share_id).first()
+        if share is None:
+            return Response({"detail": "This link is not shared any more."}, status=status.HTTP_404_NOT_FOUND)
+        draft = share.strategy.clone_for(request.user)
+        return Response(StrategySerializer(draft).data, status=status.HTTP_201_CREATED)
+
+
+class StrategyActivateView(APIView):
+    """Start tracking a draft. Nothing is charged now; the first monthly charge is 30 days away, as for a new strategy."""
+    authentication_classes = [JWTAuthentication, ]
+    permission_classes = [IsAuthenticated, ]
+
+    def post(self, request, pk):
+        strategy = Strategy.objects.filter(pk=pk, user=request.user).first()
+        if strategy is None:
+            return Response({"detail": "Strategy not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not strategy.active:
+            strategy.activate()
+        return Response(StrategySerializer(strategy).data)
 
 
 class PasswordResetRequestView(APIView):
