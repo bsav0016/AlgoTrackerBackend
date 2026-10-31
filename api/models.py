@@ -134,6 +134,9 @@ class Strategy(models.Model):
     active = models.BooleanField(default=True)  # False for a draft (a copy of a shared strategy) that is not tracked or billed yet
     cloned_from = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="clones")
     last_processed_ts = models.BigIntegerField(null=True, blank=True)  # timestamp of the newest candle already evaluated
+    # When live tracking began: set on creation and again on activation, the moment `strategy_return` and
+    # `asset_return` start from 1. Empty for strategies from before it was recorded, and for drafts.
+    started_at = models.DateTimeField(null=True, blank=True, default=timezone.now)
 
     def add_signals(self, signals: List[Signal]):
         updated_buy_signals = []
@@ -240,7 +243,8 @@ class Strategy(models.Model):
         """A draft copy for `user`: the same rules, symbol, interval and title, not tracked or billed until activated."""
         return Strategy.objects.create(
             user=user, title=self.title, symbol=self.symbol, interval=self.interval,
-            buy_signals=self.buy_signals, sell_signals=self.sell_signals, active=False, cloned_from=self)
+            buy_signals=self.buy_signals, sell_signals=self.sell_signals, active=False, cloned_from=self,
+            started_at=None)
 
     def activate(self):
         """Start tracking a draft now: fresh returns and position, and the first monthly charge 30 days away."""
@@ -250,8 +254,9 @@ class Strategy(models.Model):
         self.asset_return = 1
         self.last_processed_ts = None
         self.charge_user_date = get_thirty_days_away()
+        self.started_at = timezone.now()
         self.save(update_fields=["active", "position", "strategy_return", "asset_return", "last_processed_ts",
-                                 "charge_user_date"])
+                                 "charge_user_date", "started_at"])
 
     def send_notifications(self, trade, message):
         """Record that `trade` owes the user a push, in the same transaction as the trade.
