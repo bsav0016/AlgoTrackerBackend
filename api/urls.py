@@ -2,7 +2,8 @@ from django.urls import path
 from api.views import (UserRegistrationView, LoginView, LogoutView, BacktestView, StrategyView, DeviceIDView, NotificationHistoryView,
                        AvailableSymbolsAndIntervalsView, PasswordResetRequestView, PasswordResetConfirmView,
                        StripePaymentView,StripePaymentConfirmationView, UserDetailsView, DeleteAccountView,
-                       PromoCodeAvailabilityView, RevenueCatCustomerView, RevenueCatConfirmationView, HealthView, CreditHistoryView)
+                       PromoCodeAvailabilityView, RevenueCatCustomerView, RevenueCatConfirmationView, HealthView, CreditHistoryView,
+                       StrategyShareView, SharedStrategyView)
 from rest_framework_simplejwt.views import TokenRefreshView
 
 
@@ -23,6 +24,8 @@ urlpatterns = [
     path('backtest/', BacktestView.as_view(), name='backtest'),
     path('strategy/', StrategyView.as_view(), name='strategy'),
     path('strategy/<int:pk>/', StrategyView.as_view(), name='strategy-detail'),
+    path('strategy/<int:pk>/share/', StrategyShareView.as_view(), name='strategy-share'),
+    path('shared/<str:share_id>/', SharedStrategyView.as_view(), name='shared-strategy'),
     path('notifications/', NotificationHistoryView.as_view(), name='notifications'),
     path('device-id/', DeviceIDView.as_view(), name='device-id'),
     path('symbols-and-intervals/', AvailableSymbolsAndIntervalsView.as_view(), name='symbols-and-intervals'),

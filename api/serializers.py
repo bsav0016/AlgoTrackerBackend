@@ -61,6 +61,16 @@ class StrategySerializer(serializers.ModelSerializer):
         read_only_fields = ['last_processed_ts']  # the live job sets it: the open time (Unix seconds) of the newest candle checked
 
 
+class SharedStrategySerializer(serializers.ModelSerializer):
+    """What anyone holding a share link may see. An allow-list on purpose: nothing about the owner (id, name,
+    email, credits, devices), the billing date or the strategy's internal state is ever added here."""
+
+    class Meta:
+        model = Strategy
+        fields = ['title', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'strategy_return', 'asset_return']
+        read_only_fields = fields
+
+
 class UserRegistrationSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser

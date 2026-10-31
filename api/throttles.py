@@ -60,6 +60,11 @@ class RegisterAddressThrottle(_ByAddress):
     scope = "register_address"
 
 
+class SharedStrategyAddressThrottle(_ByAddress):
+    """The share page is public, so it is limited per address to stop link-guessing and scraping."""
+    scope = "shared_view_address"
+
+
 class PasswordResetAddressThrottle(_ByAddress):
     scope = "reset_address"
 

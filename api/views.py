@@ -11,15 +11,15 @@ from django.conf import settings
 from django.db import connection, transaction
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from api.serializers import (UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
+from api.serializers import (SharedStrategySerializer, UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
                              CreditTransactionSerializer, NotificationSerializer,
                              BacktestRequestSerializer, StrategyRequestSerializer)
 from api import credits
-from api.models import (Strategy, Notification, PushDevice, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
+from api.models import (Strategy, StrategyShare, Notification, PushDevice, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
                         RevenueCatConfirmation)
 from api.push_sweep import backlog as push_backlog
 from api.services.auth_service import AuthService
-from api.throttles import (LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
+from api.throttles import (SharedStrategyAddressThrottle, LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
                            PasswordResetAddressThrottle, PasswordResetEmailThrottle,
                            PasswordResetConfirmAddressThrottle, PasswordResetConfirmUsernameThrottle)
 from api.services.backtest_service import BacktestService
@@ -485,6 +485,46 @@ class StrategyView(APIView):
         except Exception as e:
             logger.exception("Strategy lookup failed")
             return Response({"detail": "Internal error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class StrategyShareView(APIView):
+    """The owner turns a public link for one of their strategies on or off."""
+    authentication_classes = [JWTAuthentication, ]
+    permission_classes = [IsAuthenticated, ]
+
+    def get_strategy(self, request, pk):
+        # Someone else's strategy answers 404, the same as one that does not exist, so ids cannot be probed.
+        return Strategy.objects.filter(pk=pk, user=request.user).first()
+
+    def post(self, request, pk):
+        """Share the strategy. Repeating the call returns the same link instead of making a second one."""
+        strategy = self.get_strategy(request, pk)
+        if strategy is None:
+            return Response({"detail": "Strategy not found."}, status=status.HTTP_404_NOT_FOUND)
+        share, created = StrategyShare.objects.get_or_create(strategy=strategy)
+        return Response({"share_id": share.share_id},
+                        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    def delete(self, request, pk):
+        """Stop sharing. The old link stops working for good; sharing again makes a new one."""
+        strategy = self.get_strategy(request, pk)
+        if strategy is None:
+            return Response({"detail": "Strategy not found."}, status=status.HTTP_404_NOT_FOUND)
+        StrategyShare.objects.filter(strategy=strategy).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SharedStrategyView(APIView):
+    """Public, read-only view of a shared strategy. No sign-in; limited per address."""
+    authentication_classes = []
+    permission_classes = [AllowAny, ]
+    throttle_classes = [SharedStrategyAddressThrottle, ]
+
+    def get(self, request, share_id):
+        share = StrategyShare.objects.select_related("strategy").filter(share_id=share_id).first()
+        if share is None:
+            return Response({"detail": "This link is not shared any more."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(SharedStrategySerializer(share.strategy).data)
 
 
 class PasswordResetRequestView(APIView):
