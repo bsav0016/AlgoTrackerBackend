@@ -26,6 +26,26 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-shot: applies database migrations, then exits. Every service that uses the database waits for it to
+  # finish (depends_on ... service_completed_successfully), so `docker compose up --build -d` never starts new code
+  # against an old schema. If a migration fails the app services do not start, and the error is in
+  # `docker compose logs migrate`.
+  migrate:
+    build: .
+    restart: "no"
+    command: python manage.py migrate --noinput
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-algotracker}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-algotracker}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./${FIREBASE_CREDENTIALS_PATH}:/app/${FIREBASE_CREDENTIALS_PATH}:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   web:
     build: .
     restart: unless-stopped
@@ -43,6 +63,8 @@ services:
       retries: 3
       start_period: 30s
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -59,6 +81,8 @@ services:
     volumes:
       - ./${FIREBASE_CREDENTIALS_PATH}:/app/${FIREBASE_CREDENTIALS_PATH}:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -75,6 +99,8 @@ services:
     volumes:
       - ./${FIREBASE_CREDENTIALS_PATH}:/app/${FIREBASE_CREDENTIALS_PATH}:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -89,6 +115,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-algotracker}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-algotracker}
       REDIS_URL: redis://redis:6379/0
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -105,6 +133,8 @@ services:
     volumes:
       - ./${FIREBASE_CREDENTIALS_PATH}:/app/${FIREBASE_CREDENTIALS_PATH}:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:

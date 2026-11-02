@@ -84,3 +84,33 @@ jobs:
       # Proves the image has every dependency; test settings use no live services or credentials.
       - name: Run the tests inside the image
         run: docker run --rm algotracker-api:ci python manage.py test
+      # The Django admin and the browsable API need their collected static files, and whitenoise needs its manifest.
+      # DEBUG=True and a throwaway key only make settings.py importable without real secrets (SQLite, no Redis needed).
+      - name: Static files are collected into the image and served
+        run: |
+          docker run --rm -e DEBUG=True -e SECRET_KEY=ci-only algotracker-api:ci python -c "
+          import os, django
+          os.environ['DJANGO_SETTINGS_MODULE'] = 'algo_tracker_backend.settings'
+          django.setup()
+          from django.conf import settings
+          from django.test import Client
+          assert os.path.exists(os.path.join(settings.STATIC_ROOT, 'staticfiles.json')), 'no static manifest'
+          r = Client(HTTP_HOST='localhost').get('/static/admin/css/base.css')
+          assert r.status_code == 200, r.status_code
+          # The admin login page renders every static file through the manifest; a missing entry raises here.
+          assert Client(HTTP_HOST='localhost').get('/admin/login/').status_code == 200
+          print('static ok')"
+      - name: Migrations apply to an empty database inside the image
+        run: docker run --rm -e DEBUG=True -e SECRET_KEY=ci-only algotracker-api:ci python manage.py migrate --noinput
+      - name: The migrate service is wired in front of the app services
+        run: |
+          docker compose config --format json > compose.json
+          python3 - <<'PY'
+          import json
+          services = json.load(open("compose.json"))["services"]
+          assert services["migrate"]["restart"] == "no"
+          for name in ("web", "worker-tasks", "worker-push-sweeper", "worker-leaderboard", "worker-websocket"):
+              dep = services[name]["depends_on"]["migrate"]
+              assert dep["condition"] == "service_completed_successfully", name
+          print("compose ok")
+          PY
