@@ -40,6 +40,9 @@ ALLOWED_HOSTS = [
 SECRET_KEY = os.getenv('SECRET_KEY', default='')
 
 TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "Not found")
+# (connect, read) seconds for every call to TwelveData. Without a timeout a stalled connection blocks its
+# caller for ever: a web worker, an RQ job or the websocket worker.
+TWELVE_DATA_TIMEOUT = (float(os.getenv("TWELVE_DATA_CONNECT_TIMEOUT", 5)), float(os.getenv("TWELVE_DATA_READ_TIMEOUT", 20)))
 
 AUTH_USER_MODEL = 'api.CustomUser'
 

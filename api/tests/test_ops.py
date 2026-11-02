@@ -104,6 +104,11 @@ class SeedHistoryTests(FakeRedisCase):
         self.seed()
         self.assertRegex(self.get.call_args.kwargs["params"]["end_date"], r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$")
 
+    def test_history_requests_have_a_timeout(self):
+        self.seed()
+        connect, read = self.get.call_args.kwargs["timeout"]
+        self.assertTrue(0 < connect <= 10 and 0 < read <= 60)
+
     def test_loading_history_does_not_run_strategies(self):
         make_strategy(make_user(), position=1)
         self.seed()

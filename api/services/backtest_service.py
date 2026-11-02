@@ -13,6 +13,11 @@ import pytz
 
 TWELVE_DATA_API_KEY = settings.TWELVE_DATA_API_KEY
 BACKTEST_ITERATIONS = settings.BACKTEST_ITERATIONS
+TWELVE_DATA_TIMEOUT = settings.TWELVE_DATA_TIMEOUT
+
+
+class MarketDataUnavailable(Exception):
+    """TwelveData could not be reached in time (timeout, connection error). Safe to try again later."""
 
 matplotlib.use("Agg")
 
@@ -56,7 +61,11 @@ class BacktestService:
             "apikey": TWELVE_DATA_API_KEY
         }
 
-        response = requests.get(url, params=params)
+        try:
+            response = requests.get(url, params=params, timeout=TWELVE_DATA_TIMEOUT)
+        except requests.RequestException as e:
+            # The message must not contain the URL: it carries the API key in its query string.
+            raise MarketDataUnavailable(f"Market data request failed ({type(e).__name__})") from None
 
         if response.status_code == 200:
             data = response.json()

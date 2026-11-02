@@ -40,7 +40,7 @@ Back-testing a strategy and watching live prices around the clock are too heavy 
 
 | Service | Role |
 | --- | --- |
-| `web` | Django API (gunicorn) |
+| `web` | Django API (gunicorn: 3 workers of 2 threads, a 150 s worker timeout and workers recycled every ~1000 requests; see `gunicorn.conf.py` and the `GUNICORN_*` variables in `.env.example`) |
 | `worker-tasks` | `python manage.py rqworker default --with-scheduler` – runs strategy checks and push sends (the scheduler times push retries) |
 | `worker-leaderboard` | `python manage.py leaderboard_rank` – every hour snapshots each leaderboard member's strategies on Monday (UTC), publishes the week that just ended once, and rebuilds the all-time board |
 | `worker-push-sweeper` | `python manage.py push_sweep` – every minute re-queues pushes whose send job was missed and settles sent pushes from Expo's receipts |

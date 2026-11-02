@@ -2,6 +2,7 @@
 import math
 from unittest import mock
 
+import requests
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -105,6 +106,16 @@ class BacktestEndpointTests(APITestCase):
         suffixes = sorted(k.split(":", 2)[2] for k in
                           ledger().values_list("idempotency_key", flat=True))
         self.assertEqual(suffixes, ["reserve", "reserve", "reserve:refund", "reserve:refund"])
+
+    def test_a_market_data_timeout_is_a_clean_503_and_the_user_is_not_charged(self):
+        self.set_credits(1, 10)
+        self.get.side_effect = requests.Timeout("slow")
+        response = self.client.post(self.url, backtest_payload(), format="json")
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertIn("not charged", response.data["detail"])
+        self.assertEqual(self.credits(), (1, 10))
+        self.assertEqual(sorted(k.split(":", 2)[2] for k in ledger().values_list("idempotency_key", flat=True)),
+                         ["reserve", "reserve", "reserve:refund", "reserve:refund"])
 
     def test_nothing_is_fetched_from_the_market_data_api_when_the_user_cannot_pay(self):
         self.set_credits(1, 1)
