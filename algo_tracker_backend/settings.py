@@ -340,3 +340,15 @@ LOGGING = {
     # These log the full request URL or headers at DEBUG, and the TwelveData API key is in both.
     "loggers": {name: {"level": "WARNING"} for name in ("urllib3", "websockets", "requests")},
 }
+
+
+# Error tracking (Sentry). Off unless SENTRY_DSN is set; see algo_tracker_backend/error_tracking.py for exactly what
+# is and is not sent. Every process that imports settings (web, RQ workers, sweeper, leaderboard, websocket worker)
+# starts it.
+from algo_tracker_backend.error_tracking import init_error_tracking  # noqa: E402
+
+init_error_tracking(
+    os.getenv("SENTRY_DSN", ""),
+    environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
+    release=os.getenv("SENTRY_RELEASE") or None,
+)
