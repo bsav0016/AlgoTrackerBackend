@@ -51,7 +51,8 @@ class ScrubStringTests(APITestCase):
             "Invalid token: abcdefgh": "Invalid token: [filtered]",
             "Authorization: Bearer " + JWT: "Authorization: [filtered]",
             "header Bearer abcdefghijkl here": "header Bearer [filtered] here",
-            "stripe sk_live_abcdefgh1234 key": "stripe [filtered] key",
+            # sk_test_ here: the repository's secret scan (rightly) rejects anything shaped like a live key.
+            "stripe sk_test_abcdefgh1234 key": "stripe [filtered] key",
             "whsec_abcdefghij": "[filtered]",
             JWT: "[filtered]",
         }
