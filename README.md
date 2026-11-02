@@ -111,9 +111,9 @@ Static checks use Ruff (`pip install -r requirements-dev.txt`, then `ruff check 
    ```bash
    docker compose up --build
    ```
+   Database migrations run by themselves: the one-shot `migrate` service applies them and the app services wait for it, so new code never starts against an old schema. If a migration fails the app does not start; read `docker compose logs migrate`. Static files are collected when the image is built.
 4. First run only:
    ```bash
-   docker compose exec web python manage.py migrate
    docker compose exec web python manage.py createsuperuser
    ```
 5. Optional, on a fresh Redis: `docker compose exec web python manage.py seed_candles` loads recent candles (with highs and lows) so strategies have history straight away. Pairs that already have candles are skipped, `--force` reloads them, and strategies are not run on history.
@@ -121,7 +121,7 @@ Static checks use Ruff (`pip install -r requirements-dev.txt`, then `ruff check 
 
 `GET /api/health/` (no login) reports whether the database and Redis are up and how many seconds since the websocket worker last received a price (`null` if none yet), plus the push backlog (`pending_deliveries`, `failed_deliveries_24h`, `oldest_pending_seconds`); it returns 503 if the database or Redis is down. A quiet feed is not an error, since markets close. The `web` container uses it as its healthcheck. Logs go to stderr (`docker compose logs worker-websocket`); set `LOG_LEVEL=DEBUG` to log every price message.
 
-Production runs the same compose file on a single DigitalOcean droplet; deploys are manual (`git pull`, `docker compose up --build -d`).
+Production runs the same compose file on a single DigitalOcean droplet; deploys are manual (`git pull`, `docker compose up --build -d`, which also runs the migrations first).
 
 ## Credits
 

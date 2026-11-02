@@ -32,6 +32,12 @@ os.environ.pop("FIREBASE_CREDENTIALS_PATH", None)
 
 from .settings import *  # noqa: E402,F401,F403
 
+# The tests never run collectstatic, so the manifest storage would fail on any template that uses a static file.
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+}
+
 # The rate limits count in the "throttle" cache; keep it in process, and make the limits too high to get in
 # the way of the other tests (the throttle tests set their own).
 CACHES["throttle"] = {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
