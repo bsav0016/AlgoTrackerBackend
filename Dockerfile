@@ -20,4 +20,5 @@ COPY . .
 # import successfully, which aren't available at build time — so collectstatic
 # and migrate run at container start (see docker-compose.yml / deploy steps),
 # not here.
-CMD ["gunicorn", "algo_tracker_backend.wsgi", "--bind", "0.0.0.0:8000", "--log-file", "-"]
+# Workers, threads and timeouts live in gunicorn.conf.py (settings can be overridden with GUNICORN_* variables).
+CMD ["gunicorn", "algo_tracker_backend.wsgi", "--config", "gunicorn.conf.py"]

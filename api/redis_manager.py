@@ -81,7 +81,7 @@ class RedisManager:
             "apikey": TWELVE_DATA_API_KEY
         }
 
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=settings.TWELVE_DATA_TIMEOUT)
 
         if response.status_code == 429:
             raise CreditsUsedError("All credits used (429 Too Many Requests)")

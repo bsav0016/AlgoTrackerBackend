@@ -24,7 +24,7 @@ from api.services.auth_service import AuthService
 from api.throttles import (LeaderboardReadAddressThrottle, LeaderboardNameAddressThrottle, SharedStrategyAddressThrottle, SharedCardAddressThrottle, LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
                            PasswordResetAddressThrottle, PasswordResetEmailThrottle,
                            PasswordResetConfirmAddressThrottle, PasswordResetConfirmUsernameThrottle)
-from api.services.backtest_service import BacktestService
+from api.services.backtest_service import BacktestService, MarketDataUnavailable
 from api.services.card_service import render_card
 from api.services.share_page import not_shared_page, shared_strategy_page
 from api.indicators.signal import Signal
@@ -430,12 +430,20 @@ class BacktestView(APIView):
                 except credits.InsufficientCredits:
                     return Response({"detail": f"Requires ${base_cost}"}, status=status.HTTP_402_PAYMENT_REQUIRED)
 
+                def give_back():
+                    for suffix in ("reserve", "settle"):
+                        credits.refund(user.pk, f"{spend_key}:{suffix}", f"{spend_key}:{suffix}:refund", "backtest")
+
                 try:
                     return self.run_and_settle(
                         user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals)
+                except MarketDataUnavailable:
+                    give_back()
+                    logger.warning("Backtest market data unavailable for %s %s", symbol, interval)
+                    return Response({"detail": "Market data is not available right now. You were not charged. Try again in a moment."},
+                                    status=status.HTTP_503_SERVICE_UNAVAILABLE)
                 except Exception:
-                    for suffix in ("reserve", "settle"):
-                        credits.refund(user.pk, f"{spend_key}:{suffix}", f"{spend_key}:{suffix}:refund", "backtest")
+                    give_back()
                     raise
             except Exception as e:
                 logger.exception("Error building response")

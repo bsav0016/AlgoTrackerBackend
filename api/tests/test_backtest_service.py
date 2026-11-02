@@ -3,11 +3,12 @@ import datetime
 from unittest import mock
 
 import pandas as pd
+import requests
 from django.test import SimpleTestCase, TestCase
 
 from api.indicators.signal import Signal
 from api.models import CustomUser
-from api.services.backtest_service import BacktestService
+from api.services.backtest_service import BacktestService, MarketDataUnavailable
 from api.tests.helpers import FakeResponse, twelve_data_values
 
 UTC = datetime.timezone.utc
@@ -206,6 +207,20 @@ class GetDataTests(SimpleTestCase):
                            side_effect=never_reaches_start) as get:
             BacktestService.get_data("AAPL", "1day", self.START, self.END)
         self.assertEqual(get.call_count, 2)  # never an unbounded number of paid API calls
+
+    def test_every_request_has_a_timeout(self):
+        _, get = self.get([FakeResponse(200, {"values": twelve_data_values("2024-01-01", [1, 2, 3, 4])})])
+        connect, read = get.call_args[1]["timeout"]
+        self.assertTrue(0 < connect <= 10 and 0 < read <= 60)
+
+    def test_a_timeout_or_connection_error_becomes_market_data_unavailable_without_leaking_the_key(self):
+        for error in (requests.Timeout("slow https://api.twelvedata.com/time_series?apikey=test-twelve-data-key"),
+                      requests.ConnectionError("no route")):
+            with self.subTest(error=type(error).__name__):
+                with self.assertRaises(MarketDataUnavailable) as caught:
+                    self.get(error)
+                self.assertNotIn("test-twelve-data-key", str(caught.exception))
+                self.assertNotIn("apikey", str(caught.exception))
 
     def test_http_error_raises(self):
         with self.assertRaisesRegex(Exception, "status 500"):
