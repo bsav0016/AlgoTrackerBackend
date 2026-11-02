@@ -29,6 +29,8 @@ os.environ.update({
     "BACKTEST_ITERATIONS": "5",
 })
 os.environ.pop("FIREBASE_CREDENTIALS_PATH", None)
+# Error tracking must never start under test, whatever the developer's environment holds.
+os.environ.pop("SENTRY_DSN", None)
 
 from .settings import *  # noqa: E402,F401,F403
 
