@@ -18,6 +18,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 
+from algo_tracker_backend.markets import parse_market
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -256,7 +258,7 @@ def parse_pairs(raw):
 available_symbol_str = os.getenv("SYMBOLS", "")
 
 SYMBOLS = {
-    key: float(value)
+    key: parse_market(key, value)
     for key, value in parse_pairs(available_symbol_str)
 }
 

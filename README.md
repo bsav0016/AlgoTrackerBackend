@@ -66,7 +66,7 @@ Edit `.env` (it is git-ignored). For local work you only need:
 DEBUG=True
 SECRET_KEY=any-local-string
 ALLOWED_HOSTS=localhost,127.0.0.1
-SYMBOLS=AAPL:1,BTC/USD:24
+SYMBOLS=AAPL:us_equity,BTC/USD:always_open
 INTERVALS=1min:60:100,1day:86400:10
 ```
 
@@ -99,7 +99,7 @@ The suite covers the indicators, backtest math, live signal handling (including 
 
 `api/tests/test_indicator_reference.py` checks RSI, ADX and the MACD value against the standard (Wilder) definitions, written as plain loops in `api/tests/reference_indicators.py`, and pins how Sharpe and Sortino are annualised. The app's RSI, ADX and MACD value currently differ from the standard, so those tests are marked `expectedFailure` until each is fixed (issue #67). `python manage.py indicator_report BTC/USD 1day` runs the same comparison on real price history (uses TwelveData credits; `--synthetic` needs no network).
 
-**The number after the colon in `SYMBOLS` is the hours the market trades in a year** (8760 for a 24/7 market, 1638 for a US stock), not the small examples shown here; it sets how Sharpe and Sortino are annualised. `AAPL:1,BTC/USD:24` is only a test placeholder and would annualise as if the market traded for 1 or 24 hours a year.
+**`SYMBOLS` names each symbol's market** (`AAPL:us_equity,BTC/USD:always_open`). It sets the candles in a year, which scales Sharpe and Sortino: `always_open` is 24/7 (365 sessions of 24 hours), `us_equity` is 252 sessions of 6.5 hours, and `252d6.5h` spells out any other market. Intraday candles use the trading hours, a daily candle is one session (252 a year for stocks, 365 for 24/7) and longer candles use calendar time. The old format, a bare number of trading hours per year (`BTC/USD:8760`), is still read with a warning in the log; its arithmetic is unchanged, so a stock with daily candles still gets the old (too low) count until you switch it to a name.
 
 Static checks use Ruff (`pip install -r requirements-dev.txt`, then `ruff check --select E9,F63,F7,F82 .`, which flags syntax errors and undefined names).
 
