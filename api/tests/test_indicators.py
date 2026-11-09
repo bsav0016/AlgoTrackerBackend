@@ -31,6 +31,8 @@ CLOSE = [10, 11, 12, 11, 13]
 
 
 class IndicatorTests(SimpleTestCase):
+    """The original (version 1) RSI, ADX and MACD value are pinned here; the standard ones are in test_indicator_reference."""
+
     def assertSeriesAlmostEqual(self, series, expected):
         self.assertEqual(len(series), len(expected))
         for got, want in zip(series, expected):
@@ -51,14 +53,14 @@ class IndicatorTests(SimpleTestCase):
             out["EMA_3"], [1.0, 10.5 / 11, 11.25 / 12, 11.125 / 11, 12.0625 / 13])
 
     def test_rsi_uses_average_gain_over_average_loss(self):
-        out = calculate_rsi(prices(CLOSE), make_signal("RSI", window=3))
+        out = calculate_rsi(prices(CLOSE), make_signal("RSI", window=3, version=1))
         # idx3: avg gain 2/3 / avg loss 1/3 -> RS 2 -> 66.67; idx4: gain 1 / loss 1/3 -> RS 3 -> 75
         # idx2 is already 100: the NaN first diff counts as a 0 gain/loss, so the first window
         # holds only two real changes (both gains). Pinned as current behaviour.
         self.assertSeriesAlmostEqual(out["RSI_3"], [None, None, 100, 100 - 100 / 3, 75])
 
     def test_rsi_is_100_when_price_never_falls(self):
-        out = calculate_rsi(prices([1, 2, 3, 4, 5]), make_signal("RSI", window=3))
+        out = calculate_rsi(prices([1, 2, 3, 4, 5]), make_signal("RSI", window=3, version=1))
         self.assertEqual(out["RSI_3"].iloc[-1], 100)
 
     def test_bollinger_percent_b_position_inside_bands(self):
@@ -74,7 +76,7 @@ class IndicatorTests(SimpleTestCase):
         self.assertSeriesAlmostEqual(out["SO_3"], [None, None, 75, 100 / 3, 75])
 
     def test_macd_column_name_and_values(self):
-        signal = make_signal("MACD", fast_window=2, slow_window=3, signal_window=2)
+        signal = make_signal("MACD", fast_window=2, slow_window=3, signal_window=2, version=1)
         out = calculate_macd(prices([10, 11, 12]), signal)
         # MACD line 0, 1/6, 0.30556; signal line 0, 1/9, 0.24074 -> ratio
         column = out["MACD_2_3_2"]
@@ -85,12 +87,12 @@ class IndicatorTests(SimpleTestCase):
     def test_adx_is_100_in_a_pure_uptrend(self):
         close = [10 + i for i in range(8)]
         out = calculate_adx(prices(close, low=[c - 0.5 for c in close],
-                                   high=[c + 0.5 for c in close]), make_signal("ADX", window=2))
+                                   high=[c + 0.5 for c in close]), make_signal("ADX", window=2, version=1))
         self.assertAlmostEqual(out["ADX_2"].iloc[-1], 100)
 
     def test_adx_stays_between_0_and_100_for_choppy_prices(self):
         close = [10, 12, 9, 13, 8, 14, 9, 12, 10, 11, 9, 13]
-        out = calculate_adx(prices(close), make_signal("ADX", window=3)).dropna(subset=["ADX_3"])
+        out = calculate_adx(prices(close), make_signal("ADX", window=3, version=1)).dropna(subset=["ADX_3"])
         self.assertFalse(out.empty)
         self.assertTrue(out["ADX_3"].between(0, 100).all())
 

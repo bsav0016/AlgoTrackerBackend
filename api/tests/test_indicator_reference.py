@@ -1,11 +1,9 @@
-"""Indicators and annualisation checked against the standard definitions.
+"""RSI, ADX and the MACD value checked against the standard definitions, written as plain loops.
 
-Tests marked expectedFailure describe the standard result and currently fail: the app's RSI, ADX and MACD value
-are not the standard ones (see issue #67). Whoever fixes an indicator removes its marker; a marked test that starts
-passing fails the suite, so the markers cannot go stale.
+Version 2 of RSI, ADX and the MACD value is the standard definition; these tests compare it with plain-loop
+references. Version 1, the original definitions kept for strategies saved before, is pinned in test_indicators.
 """
 import math
-import unittest
 
 import pandas as pd
 from django.test import SimpleTestCase
@@ -44,13 +42,11 @@ class ReferenceDefinitionTests(SimpleTestCase):
 
 
 class RsiReferenceTests(SimpleTestCase):
-    @unittest.expectedFailure
     def test_rsi_matches_wilder_on_the_hand_worked_series(self):
         out = calculate_rsi(prices([10, 11, 10, 12, 13, 12]), make_signal("RSI", window=3))
         for got, want in zip(out["RSI_3"].iloc[3:], [75.0, 100 - 100 / 5.5, 58.0645]):
             self.assertAlmostEqual(got, want, places=3)
 
-    @unittest.expectedFailure
     def test_rsi_matches_wilder_over_a_long_series(self):
         close, high, low = synthetic_ohlc()
         out = calculate_rsi(prices(close, low=low, high=high), make_signal("RSI", window=14))["RSI_14"]
@@ -58,7 +54,6 @@ class RsiReferenceTests(SimpleTestCase):
             if want is not None:
                 self.assertAlmostEqual(out.iloc[i], want, places=3, msg=f"candle {i}")
 
-    @unittest.expectedFailure
     def test_rsi_has_no_value_before_n_price_changes_exist(self):
         out = calculate_rsi(prices([10, 11, 10, 12, 13, 12]), make_signal("RSI", window=3))
         self.assertTrue(out["RSI_3"].iloc[:3].isna().all())
@@ -71,7 +66,6 @@ class AdxReferenceTests(SimpleTestCase):
                             make_signal("ADX", window=3))
         self.assertAlmostEqual(out["ADX_3"].iloc[-1], 100.0)
 
-    @unittest.expectedFailure
     def test_adx_matches_wilder_over_a_long_series(self):
         close, high, low = synthetic_ohlc()
         out = calculate_adx(prices(close, low=low, high=high), make_signal("ADX", window=14))["ADX_14"]
@@ -81,7 +75,6 @@ class AdxReferenceTests(SimpleTestCase):
 
 
 class MacdReferenceTests(SimpleTestCase):
-    @unittest.expectedFailure
     def test_macd_value_is_positive_exactly_when_the_macd_line_is_above_its_signal_line(self):
         # The app divides MACD by its signal line, so the sign flips whenever the signal line is negative.
         close, high, low = synthetic_ohlc()

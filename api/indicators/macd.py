@@ -1,9 +1,14 @@
 import pandas as pd
-from api.indicators.signal import Signal
+from api.indicators.signal import Signal, LEGACY_VERSION
 
 
 def calculate_macd(data: pd.DataFrame, signal: Signal) -> pd.DataFrame:
-    """Calculates the Moving Average Convergence Divergence (MACD), Signal Line, and normalizes by current price."""
+    """MACD, its signal line and one value to compare against a target.
+
+    Version 1 divides the MACD line by the signal line, which flips sign whenever the signal line is negative.
+    Version 2 is the histogram (MACD line minus signal line) as a percent of the close, so it is above zero
+    exactly when the MACD line is above its signal line, whatever the price level.
+    """
     data = data.copy()
 
     fast_window = signal.fast_window
@@ -18,6 +23,9 @@ def calculate_macd(data: pd.DataFrame, signal: Signal) -> pd.DataFrame:
     data['Signal'] = data['MACD'].ewm(span=signal_window, adjust=False).mean()
 
     column_name = f"{signal.name}_{fast_window}_{slow_window}_{signal_window}"
-    data[column_name] = data['MACD'] / data['Signal']
+    if signal.version == LEGACY_VERSION:
+        data[column_name] = data['MACD'] / data['Signal']
+    else:
+        data[column_name] = 100 * (data['MACD'] - data['Signal']) / data['close']
 
     return data
