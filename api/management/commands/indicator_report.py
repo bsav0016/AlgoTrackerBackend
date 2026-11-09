@@ -80,8 +80,8 @@ class Command(BaseCommand):
         out(f"MACD: the value's sign disagrees with 'MACD line above its signal line' on {100 * wrong / len(usable):.1f}% of {len(usable)} candles")
 
         if symbol:
-            hours = settings.SYMBOLS[symbol]
+            market = settings.SYMBOLS[symbol]
             seconds = settings.INTERVAL_MAP[interval]["seconds"]
-            periods = BacktestService.periods_per_year(hours, seconds)
-            out(f"Annualisation: SYMBOLS setting {hours:g} (trading hours per year) and {seconds}s candles "
+            periods = market.periods_per_year(seconds)
+            out(f"Annualisation: market {market.name} and {seconds}s candles "
                 f"give {periods:,.1f} candles a year; Sharpe and Sortino are multiplied by {math.sqrt(periods):.2f}")

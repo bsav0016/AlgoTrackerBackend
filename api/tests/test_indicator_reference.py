@@ -13,13 +13,8 @@ from django.test import SimpleTestCase
 from api.indicators.adx import calculate_adx
 from api.indicators.macd import calculate_macd
 from api.indicators.rsi import calculate_rsi
-from api.services.backtest_service import BacktestService
 from api.tests.reference_indicators import macd_lines, wilder_adx, wilder_rsi
 from api.tests.test_indicators import make_signal, prices
-
-SECONDS = {"1min": 60, "1day": 86400}
-BTC_HOURS = 24 * 365          # trades round the clock
-STOCK_HOURS = 252 * 6.5       # 252 sessions of 6.5 hours
 
 
 def synthetic_ohlc(count=120):
@@ -95,25 +90,3 @@ class MacdReferenceTests(SimpleTestCase):
                              make_signal("MACD", fast_window=12, slow_window=26, signal_window=9))["MACD_12_26_9"]
         for i in range(26, len(close)):
             self.assertEqual(out.iloc[i] > 0, line[i] > signal_line[i], f"candle {i}")
-
-
-class AnnualisationTests(SimpleTestCase):
-    """Sharpe and Sortino are scaled by sqrt(candles per year). The number after the colon in SYMBOLS is the
-    hours the market trades in a year; these pin what that gives for a 24/7 symbol and a stock."""
-
-    def test_round_the_clock_market(self):
-        self.assertAlmostEqual(BacktestService.periods_per_year(BTC_HOURS, SECONDS["1min"]), 525_600)
-        self.assertAlmostEqual(BacktestService.periods_per_year(BTC_HOURS, SECONDS["1day"]), 365)
-
-    def test_stock_with_intraday_candles(self):
-        self.assertAlmostEqual(BacktestService.periods_per_year(STOCK_HOURS, SECONDS["1min"]), 98_280)
-
-    @unittest.expectedFailure
-    def test_stock_with_daily_candles_has_one_per_session(self):
-        # A daily candle is one session, so a year has 252, not 1638 hours / 24.
-        self.assertAlmostEqual(BacktestService.periods_per_year(STOCK_HOURS, SECONDS["1day"]), 252)
-
-    def test_the_documented_example_values_are_not_hours_per_year(self):
-        # README and test settings say SYMBOLS=AAPL:1,BTC/USD:24, which this formula reads as 1 and 24 trading
-        # hours a year: one daily candle a year for BTC. Pinned so a change to either side is noticed.
-        self.assertAlmostEqual(BacktestService.periods_per_year(24, SECONDS["1day"]), 1)

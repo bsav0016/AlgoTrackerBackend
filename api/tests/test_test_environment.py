@@ -2,6 +2,8 @@
 import socket
 
 from django.conf import settings
+
+from algo_tracker_backend.markets import PRESETS
 from django.test import SimpleTestCase
 
 from algo_tracker_backend.settings import parse_pairs
@@ -41,6 +43,6 @@ class ParsePairsTests(SimpleTestCase):
         self.assertEqual(parse_pairs("AAPL:1,"), [["AAPL", "1"]])
 
     def test_test_configuration_was_parsed(self):
-        self.assertEqual(settings.SYMBOLS, {"AAPL": 1.0, "BTC/USD": 24.0})
+        self.assertEqual(settings.SYMBOLS, {"AAPL": PRESETS["us_equity"], "BTC/USD": PRESETS["always_open"]})
         self.assertEqual(settings.INTERVAL_MAP["1day"], {"seconds": 86400, "monthly_charge": 10})
         self.assertEqual(settings.PROMO_CODES, {"WELCOME": "50"})
