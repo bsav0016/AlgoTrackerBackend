@@ -16,7 +16,7 @@ from api.tests.test_indicator_reference import synthetic_ohlc
 
 class Command(BaseCommand):
     help = (
-        "Compare the app's RSI, ADX and MACD with the standard (Wilder) definitions on real price history, and show "
+        "Compare the app's (original, unless --signal-version 2) RSI, ADX and MACD with the standard (Wilder) definitions on real price history, and show "
         "the candles per year used to annualise Sharpe and Sortino. Uses TwelveData credits (about one request per "
         "5000 candles). Pass --synthetic to run on made-up prices with no network."
     )
@@ -26,6 +26,8 @@ class Command(BaseCommand):
         parser.add_argument("interval", nargs="?", help="An interval from INTERVALS, e.g. 1day")
         parser.add_argument("--days", type=int, default=365, help="How far back to fetch (default 365)")
         parser.add_argument("--window", type=int, default=14, help="RSI and ADX window (default 14)")
+        parser.add_argument("--signal-version", type=int, default=1, choices=(1, 2),
+                            help="Which definition to measure: 1 is the original (default), 2 is the standard one")
         parser.add_argument("--synthetic", action="store_true", help="Use made-up prices instead of TwelveData")
 
     def handle(self, *args, **options):
@@ -49,10 +51,11 @@ class Command(BaseCommand):
 
         frame = pd.DataFrame({"close": close, "high": high, "low": low})
         out = self.stdout.write
-        out(f"Indicator report on {label}, window {n}\n")
+        out(f"Indicator report on {label}, window {n}, indicator version {options['signal_version']}\n")
 
         def signal(name, **kw):
-            return Signal(name=name, above_target=True, buy_signal=True, target_value=0, **kw)
+            return Signal(name=name, above_target=True, buy_signal=True, target_value=0,
+                          version=options["signal_version"], **kw)
 
         app_rsi = calculate_rsi(frame, signal("RSI", window=n))[f"RSI_{n}"]
         std_rsi = wilder_rsi(close, n)

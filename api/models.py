@@ -5,7 +5,7 @@ from django.dispatch import receiver
 from django.conf import settings
 from django.contrib.auth.models import BaseUserManager, AbstractBaseUser, PermissionsMixin, Permission, Group
 from django.utils.translation import gettext_lazy as _
-from api.indicators.signal import Signal
+from api.indicators.signal import Signal, LEGACY_VERSION
 from typing import List
 from api.services.signal_service import SignalService
 from api.services.backtest_service import BacktestService
@@ -152,6 +152,7 @@ class Strategy(models.Model):
                 "fast_window": signal.fast_window,
                 "slow_window": signal.slow_window,
                 "signal_window": signal.signal_window,
+                "version": signal.version,
             }
 
             if signal.buy_signal:
@@ -174,7 +175,8 @@ class Strategy(models.Model):
                 window=signal.get('window'),
                 fast_window=signal.get('fast_window'),
                 slow_window=signal.get('slow_window'),
-                signal_window=signal.get('signal_window')
+                signal_window=signal.get('signal_window'),
+                version=signal.get('version', LEGACY_VERSION),  # saved before versions existed: the original definitions
             )
             for signal in self.buy_signals
         ]
@@ -188,7 +190,8 @@ class Strategy(models.Model):
                 window=signal.get('window'),
                 fast_window=signal.get('fast_window'),
                 slow_window=signal.get('slow_window'),
-                signal_window=signal.get('signal_window')
+                signal_window=signal.get('signal_window'),
+                version=signal.get('version', LEGACY_VERSION),  # saved before versions existed: the original definitions
             )
             for signal in self.sell_signals
         ]

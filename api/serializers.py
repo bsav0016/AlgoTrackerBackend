@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from django.contrib.auth import authenticate
+from api.indicators.signal import CURRENT_VERSION, LEGACY_VERSION
 from api.models import CreditTransaction, CustomUser, Notification, Strategy, Trade
 from django.conf import settings
 import math
@@ -25,6 +26,8 @@ class SignalSerializer(serializers.Serializer):
     fast_window = serializers.IntegerField(required=False, allow_null=True)
     slow_window = serializers.IntegerField(required=False, allow_null=True)
     signal_window = serializers.IntegerField(required=False, allow_null=True)
+    # Which definition of the indicator to use. Left out means the current one.
+    version = serializers.ChoiceField(choices=(LEGACY_VERSION, CURRENT_VERSION), required=False, default=CURRENT_VERSION)
 
     SIGNAL_WINDOWS = {
         "RSI": ("window",), "SMA": ("window",), "EMA": ("window",), "SO": ("window",), "BBP": ("window",),
@@ -46,11 +49,27 @@ class SignalSerializer(serializers.Serializer):
         return attrs
 
 
+def with_signal_versions(data):
+    """Strategies saved before versions existed use the original definitions; say so rather than leave it blank."""
+    for key in ("buy_signals", "sell_signals"):
+        data[key] = [signal if "version" in signal else {**signal, "version": LEGACY_VERSION} for signal in data[key]]
+    return data
+
+
+def one_version(signals):
+    if len({signal["version"] for signal in signals}) > 1:
+        raise serializers.ValidationError("All signals in a strategy must use the same indicator version")
+    return signals
+
+
 class StrategySerializer(serializers.ModelSerializer):
     """Serializer for Strategies, including buy/sell signals and trades"""
     buy_signals = serializers.JSONField()
     sell_signals = serializers.JSONField()
     trades = TradeSerializer(many=True, read_only=True)
+
+    def to_representation(self, instance):
+        return with_signal_versions(super().to_representation(instance))
 
     class Meta:
         model = Strategy
@@ -69,6 +88,9 @@ class SharedStrategySerializer(serializers.ModelSerializer):
         model = Strategy
         fields = ['title', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'strategy_return', 'asset_return']
         read_only_fields = fields
+
+    def to_representation(self, instance):
+        return with_signal_versions(super().to_representation(instance))
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -165,6 +187,9 @@ class BacktestRequestSerializer(serializers.Serializer):
     end_date = serializers.DateTimeField()
     signals = SignalSerializer(many=True)
 
+    def validate_signals(self, signals):
+        return one_version(signals)
+
 
 class StrategyRequestSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=50)
@@ -175,7 +200,7 @@ class StrategyRequestSerializer(serializers.Serializer):
     def validate_signals(self, signals):
         if not any(signal["buy_signal"] for signal in signals):
             raise serializers.ValidationError("A strategy needs at least one buy signal")
-        return signals
+        return one_version(signals)
 
 
 class NotificationSerializer(serializers.ModelSerializer):
