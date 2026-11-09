@@ -314,3 +314,21 @@ class BacktestDataWindowTests(BacktestEndpointTests):
             response = self.client.post(self.url, backtest_payload(), format="json")
         self.assertEqual(response.status_code, status.HTTP_422_UNPROCESSABLE_ENTITY)
         self.assertEqual(self.credits(), before)
+
+
+class BacktestCostsAndReturnsTests(BacktestEndpointTests):
+    def test_response_has_period_returns_cost_and_extrapolation_flag(self):
+        response = self.client.post(self.url, backtest_payload(), format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        for key in ("period_return", "period_return_before_costs", "trade_cost_percent", "trades",
+                    "annualized_is_extrapolated", "next_candle_execution"):
+            self.assertIn(key, response.data)
+        self.assertEqual(response.data["trade_cost_percent"], 0.1)
+        self.assertFalse(response.data["next_candle_execution"])
+        self.assertLessEqual(response.data["period_return"], response.data["period_return_before_costs"] + 1e-9)
+
+    def test_next_candle_execution_is_passed_through(self):
+        payload = backtest_payload()
+        payload["next_candle_execution"] = True
+        response = self.client.post(self.url, payload, format="json")
+        self.assertTrue(response.data["next_candle_execution"])

@@ -1,3 +1,4 @@
+import math
 import base64
 import datetime
 from unittest import mock
@@ -123,10 +124,13 @@ class MetricsTests(SimpleTestCase):
         self.assertAlmostEqual(sharpe_adj, 1.1547005, places=6)  # flat asset -> same excess returns
 
     def test_sortino_ratio_matches_hand_calculation(self):
+        r = [95 / 100 - 1, 85 / 95 - 1, 90 / 85 - 1]
         sortino, sortino_adj = BacktestService.calculate_sortino_ratio(
             results([100, 95, 85, 90], [100, 100, 100, 100]))
-        self.assertAlmostEqual(sortino, -0.8226471, places=6)
-        self.assertAlmostEqual(sortino_adj, -0.8226471, places=6)
+        # mean of (-5%, -10.53%, +5.88%) over the root mean square of the downside with gains counted as zero
+        expected = (sum(r) / 3) / math.sqrt(sum(min(x, 0) ** 2 for x in r) / 3)
+        self.assertAlmostEqual(sortino, expected, places=9)
+        self.assertAlmostEqual(sortino_adj, expected, places=9)
 
     def test_ratios_are_a_pair_even_when_the_strategy_never_moves(self):
         # The view unpacks both values, so a strategy that never trades must not return a bare NaN.
@@ -144,6 +148,37 @@ class MetricsTests(SimpleTestCase):
                 calculate(empty)
         with self.assertRaises(ValueError):
             BacktestService.calculate_percent_return(pd.DataFrame({"close": [1, 2]}))
+
+
+class TradingCostTests(SimpleTestCase):
+    def frame(self):
+        return pd.DataFrame({"close": [100.0, 100, 110, 121, 121, 121],
+                             "buy": [False, True, False, False, False, False],
+                             "sell": [False, False, False, False, True, False]})
+
+    def test_a_cost_is_charged_on_each_entry_and_exit(self):
+        out = BacktestService.calculate_returns(self.frame(), cost_rate=0.01)
+        self.assertEqual(int(out["trades"].sum()), 2)
+        self.assertAlmostEqual(out["return_gross"].iloc[-1], 121.0)
+        self.assertAlmostEqual(out["return"].iloc[-1], 121.0 * 0.99 * 0.99)
+
+    def test_no_cost_leaves_net_equal_to_gross(self):
+        out = BacktestService.calculate_returns(self.frame())
+        self.assertEqual(list(out["return"]), list(out["return_gross"]))
+
+    def test_next_candle_execution_trades_one_candle_later(self):
+        now = BacktestService.calculate_returns(self.frame())
+        later = BacktestService.calculate_returns(self.frame(), delay=True)
+        self.assertEqual(list(now["held"]), [0, 1, 1, 1, 0, 0])
+        self.assertEqual(list(later["held"]), [0, 0, 1, 1, 1, 0])
+        self.assertAlmostEqual(later["return"].iloc[-1], 100 * 121 / 110)  # misses the first 10%
+
+    def test_annualize_compounds_and_caps(self):
+        year = 525600
+        self.assertAlmostEqual(BacktestService.annualize(0.05, year), 0.05)
+        self.assertAlmostEqual(BacktestService.annualize(0.05, year / 2), 1.05 ** 2 - 1)
+        self.assertEqual(BacktestService.annualize(-1.5, 60), -1.0)
+        self.assertEqual(BacktestService.annualize(0.5, 1e-9), float("inf"))
 
 
 class ChartTests(SimpleTestCase):

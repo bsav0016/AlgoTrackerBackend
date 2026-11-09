@@ -24,7 +24,7 @@ from api.services.auth_service import AuthService
 from api.throttles import (LeaderboardReadAddressThrottle, LeaderboardNameAddressThrottle, SharedStrategyAddressThrottle, SharedCardAddressThrottle, LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
                            PasswordResetAddressThrottle, PasswordResetEmailThrottle,
                            PasswordResetConfirmAddressThrottle, PasswordResetConfirmUsernameThrottle)
-from api.services.backtest_service import BacktestService, MarketDataUnavailable, NoDataForPeriod
+from api.services.backtest_service import BacktestService, SHORT_PERIOD_DAYS, MarketDataUnavailable, NoDataForPeriod
 from api.services.card_service import render_card
 from api.services.share_page import not_shared_page, shared_strategy_page
 from api.indicators.signal import Signal
@@ -418,6 +418,7 @@ class BacktestView(APIView):
                     return unsupported
 
                 signals = [Signal(**signal) for signal in signals]
+                delay = serializer.validated_data['next_candle_execution']
 
                 # Reserve the cost of one data request before spending any market-data quota; settle the
                 # extra requests once we know how many it took, and give everything back if the run fails.
@@ -436,7 +437,7 @@ class BacktestView(APIView):
 
                 try:
                     return self.run_and_settle(
-                        user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals)
+                        user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals, delay)
                 except NoDataForPeriod:
                     give_back()
                     return Response({"detail": "There are no prices for that symbol in that period. You were not charged."},
@@ -455,8 +456,11 @@ class BacktestView(APIView):
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def run_and_settle(self, user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals):
-        result, data_window = BacktestService.conduct_backtest(symbol, interval, start_date, end_date, signals)
+    def run_and_settle(self, user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals,
+                       delay=False):
+        cost_percent = settings.BACKTEST_TRADE_COST_PERCENT
+        result, data_window = BacktestService.conduct_backtest(
+            symbol, interval, start_date, end_date, signals, cost_percent / 100, delay)
         attempts = data_window.requests  # requests actually made, so a stopped search is not billed for one it never sent
         extra_cost = base_cost * (attempts - 1)
         if extra_cost > 0:
@@ -486,18 +490,23 @@ class BacktestView(APIView):
             processed_result.append(transformed_entry)
 
         img_base64, img_base64_no_signals = BacktestService.generate_backtest_chart(result)
-        percent_return, percent_return_adj = BacktestService.calculate_percent_return(result)
+        period_return, period_return_adj = BacktestService.calculate_percent_return(result)
+        gross_return, _ = BacktestService.calculate_percent_return(result.assign(**{"return": result["return_gross"]}))
         sharpe_ratio, sharpe_ratio_adj = BacktestService.calculate_sharpe_ratio(result)
         sortino_ratio, sortino_ratio_adj = BacktestService.calculate_sortino_ratio(result)
 
         duration_minutes = (result.iloc[-1]["datetime"] - result.iloc[0]["datetime"]).total_seconds() / 60
-        minutes_per_year = 525600
-        annualize_factor = minutes_per_year / duration_minutes
-
         sqrt_n = math.sqrt(SYMBOLS[symbol].periods_per_year(INTERVAL_MAP[interval]["seconds"]))
 
-        percent_return = finite_or_zero(percent_return * annualize_factor)
-        percent_return_adj = finite_or_zero(percent_return_adj * annualize_factor)
+        # Annualised by compounding. The asset's own return is compounded the same way, so "adj" is a like-for-like difference.
+        asset_period = period_return - period_return_adj
+        annual = {}
+        if duration_minutes > 0:
+            for name, value in (("strategy", period_return), ("asset", asset_period)):
+                annual[name] = BacktestService.annualize(value / 100, duration_minutes) * 100
+        percent_return = finite_or_zero(annual.get("strategy", 0))
+        percent_return_adj = finite_or_zero(annual.get("strategy", 0) - annual.get("asset", 0)) \
+            if len(annual) == 2 else 0
         sharpe_ratio = finite_or_zero(sharpe_ratio * sqrt_n)
         sharpe_ratio_adj = finite_or_zero(sharpe_ratio_adj * sqrt_n)
         sortino_ratio = finite_or_zero(sortino_ratio * sqrt_n)
@@ -509,6 +518,13 @@ class BacktestView(APIView):
             "image_no_signals": img_base64_no_signals,
             "percent_return": percent_return,
             "percent_return_adj": percent_return_adj,
+            "period_return": finite_or_zero(period_return),
+            "period_return_adj": finite_or_zero(period_return_adj),
+            "period_return_before_costs": finite_or_zero(gross_return),
+            "annualized_is_extrapolated": duration_minutes < SHORT_PERIOD_DAYS * 1440,
+            "trade_cost_percent": cost_percent,
+            "next_candle_execution": delay,
+            "trades": int(result["trades"].sum()),
             "sharpe_ratio": sharpe_ratio,
             "sharpe_ratio_adj": sharpe_ratio_adj,
             "sortino_ratio": sortino_ratio,

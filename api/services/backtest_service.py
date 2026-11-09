@@ -4,6 +4,7 @@ from api.services.signal_service import SignalService
 import pandas as pd
 from api.indicators.signal import Signal
 import datetime
+import math
 from typing import List
 import matplotlib
 import matplotlib.pyplot as plt
@@ -16,6 +17,8 @@ from typing import Optional
 TWELVE_DATA_API_KEY = settings.TWELVE_DATA_API_KEY
 BACKTEST_ITERATIONS = settings.BACKTEST_ITERATIONS
 TWELVE_DATA_TIMEOUT = settings.TWELVE_DATA_TIMEOUT
+MINUTES_PER_YEAR = 525600
+SHORT_PERIOD_DAYS = 30  # below this an annualised return extrapolates too far to mean much
 PAGE_SIZE = 5000  # candles TwelveData returns per request
 
 
@@ -92,7 +95,9 @@ class BacktestService:
             interval: str,
             start_date: datetime,
             end_date: datetime,
-            signals: List[Signal]
+            signals: List[Signal],
+            cost_rate: float = 0.0,
+            delay: bool = False,
     ) -> tuple[pd.DataFrame, DataWindow]:
         if start_date.tzinfo is None:
             start_date = start_date.replace(tzinfo=pytz.UTC)
@@ -114,7 +119,7 @@ class BacktestService:
             reason=None if history.start_reached else history.stop_reason,
             warm_up_candles=warm_up, warm_up_complete=history.warm_up_complete,
         )
-        return BacktestService.calculate_returns(indicator_data), window
+        return BacktestService.calculate_returns(indicator_data, cost_rate, delay), window
 
     @staticmethod
     def fetch_page(symbol: str, interval: str, end_date: datetime) -> pd.DataFrame:
@@ -214,33 +219,40 @@ class BacktestService:
         return new_data
 
     @staticmethod
-    def calculate_returns(data: pd.DataFrame) -> pd.DataFrame:
+    def calculate_returns(data: pd.DataFrame, cost_rate: float = 0.0, delay: bool = False) -> pd.DataFrame:
+        """Follows the buy/sell state. `cost_rate` (a fraction, 0.001 = 0.1%) is charged on the value traded at each
+        entry and exit; `delay` makes each trade happen one candle after its signal. `return` is after costs and
+        `return_gross` before them; `owned` is the signalled state, `held` the position actually taken."""
         new_data = data.copy().reset_index(drop=True)
         new_data["owned"] = 0
-        new_data["return"] = 1.0
-        new_data["return"] = new_data["return"].astype(float)
-
-        new_data.at[0, "return"] = new_data.at[0, "close"]
-
         for i in range(1, len(new_data)):
-            prev_owned = new_data.iloc[i - 1]["owned"]
-            curr_buy = new_data.iloc[i]["buy"]
-            curr_sell = new_data.iloc[i]["sell"]
-            prev_return = new_data.iloc[i - 1]["return"]
-            prev_close = new_data.iloc[i - 1]["close"]
-            curr_close = new_data.iloc[i]["close"]
-
+            prev_owned = new_data.at[i - 1, "owned"]
+            curr_buy = new_data.at[i, "buy"]
+            curr_sell = new_data.at[i, "sell"]
             if curr_buy and not prev_owned and not curr_sell:
                 new_data.at[i, "owned"] = 1
             elif curr_sell and prev_owned and not curr_buy:
                 new_data.at[i, "owned"] = 0
             else:
                 new_data.at[i, "owned"] = prev_owned
-            if prev_owned:
-                new_data.at[i, "return"] = prev_return * (curr_close / prev_close)
-            else:
-                new_data.at[i, "return"] = prev_return
+        new_data["held"] = new_data["owned"].shift(1, fill_value=0) if delay else new_data["owned"]
 
+        net = gross = float(new_data.at[0, "close"])
+        net_values, gross_values, trades = [net], [gross], [0]
+        for i in range(1, len(new_data)):
+            if new_data.at[i - 1, "held"]:
+                growth = new_data.at[i, "close"] / new_data.at[i - 1, "close"]
+                net *= growth
+                gross *= growth
+            traded = int(new_data.at[i, "held"] != new_data.at[i - 1, "held"])
+            if traded:
+                net *= 1 - cost_rate
+            net_values.append(net)
+            gross_values.append(gross)
+            trades.append(traded)
+        new_data["return"] = net_values
+        new_data["return_gross"] = gross_values
+        new_data["trades"] = trades
         return new_data
 
     @staticmethod
@@ -340,29 +352,29 @@ class BacktestService:
         if backtest_results.empty or "return" not in backtest_results or "close" not in backtest_results:
             raise ValueError("Backtest results must contain return and stock price data.")
 
-        # Risk-free (0% baseline)
-        strategy_returns = backtest_results["return"].dropna().pct_change()
-        downside_returns = strategy_returns[strategy_returns < 0]
-        if downside_returns.std() == 0:
-            return float("nan"), float("nan")
-        sortino_ratio = strategy_returns.mean() / downside_returns.std()
+        # Risk-free (0% baseline). Downside deviation uses every period, counting gains as zero.
+        strategy_returns = backtest_results["return"].dropna().pct_change().dropna()
+        sortino_ratio = BacktestService.sortino(strategy_returns)
 
         # Adjusted using asset price as the baseline
-        asset_returns = backtest_results["close"].dropna().pct_change()
+        asset_returns = backtest_results["close"].dropna().pct_change().dropna()
         min_length = min(len(strategy_returns), len(asset_returns))
-        strategy_returns = strategy_returns.iloc[:min_length]
-        asset_returns = asset_returns.iloc[:min_length]
-        excess_returns = strategy_returns - asset_returns
-        downside_returns = excess_returns[excess_returns < 0]
-        if downside_returns.std() == 0:
-            return sortino_ratio, float("nan")
-        sortino_ratio_adj = excess_returns.mean() / downside_returns.std()
+        excess_returns = strategy_returns.iloc[:min_length].reset_index(drop=True) - \
+            asset_returns.iloc[:min_length].reset_index(drop=True)
+        return sortino_ratio, BacktestService.sortino(excess_returns)
 
-        return sortino_ratio, sortino_ratio_adj
+    @staticmethod
+    def sortino(returns: pd.Series) -> float:
+        if returns.empty:
+            return float("nan")
+        downside_deviation = math.sqrt((returns.clip(upper=0) ** 2).mean())
+        if downside_deviation == 0:
+            return float("nan")
+        return returns.mean() / downside_deviation
 
     @staticmethod
     def calculate_percent_return(backtest_results: pd.DataFrame) -> tuple[float, float]:
-        """Calculates the annual percentage gain of the strategy and compares it to the stock's annual percentage gain."""
+        """The strategy's percentage gain over the period (after costs) and its difference from the asset's gain."""
         if backtest_results.empty or "return" not in backtest_results or "close" not in backtest_results:
             raise ValueError("Backtest results must contain return and stock price data.")
 
@@ -375,3 +387,13 @@ class BacktestService:
         percent_return_adj = percent_return - asset_return
 
         return percent_return * 100, percent_return_adj * 100
+
+    @staticmethod
+    def annualize(fraction: float, duration_minutes: float) -> float:
+        """Compounds a period return (0.05 = 5%) to a year. Overflow and a total loss are capped, not raised."""
+        if fraction <= -1:
+            return -1.0
+        try:
+            return (1 + fraction) ** (MINUTES_PER_YEAR / duration_minutes) - 1
+        except (OverflowError, ZeroDivisionError):
+            return float("inf")
