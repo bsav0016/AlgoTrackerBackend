@@ -24,6 +24,16 @@ matplotlib.use("Agg")
 
 class BacktestService:
     @staticmethod
+    def periods_per_year(symbol_setting: float, interval_seconds: int) -> float:
+        """Candles in a year, used to scale Sharpe and Sortino to annual figures.
+
+        `symbol_setting` is the number after the colon in SYMBOLS: the hours the market trades in a year.
+        Examples: 8760 for a 24/7 market, 1638 for a US stock (252 days of 6.5 hours).
+        """
+        seconds_per_year = 365 * 24 * 60 * 60
+        return seconds_per_year * symbol_setting / (365 * 24) / interval_seconds
+
+    @staticmethod
     def conduct_backtest(
             symbol: str,
             interval: str,

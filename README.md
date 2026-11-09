@@ -97,6 +97,10 @@ The credit concurrency tests (`api/tests/test_credits_concurrency.py`) need row 
 
 The suite covers the indicators, backtest math, live signal handling (including candle building from ticks, running a job twice or out of order, replaying one price series through the live path and the backtest to check they agree, and the path from a stored candle through the Redis candle list and the queued job to a buy or sell, run against an in-memory Redis) and billing, and the account (including the password-reset flow, that reset codes are never logged, and the wrong-guess limit), backtest, strategy and payment APIs.
 
+`api/tests/test_indicator_reference.py` checks RSI, ADX and the MACD value against the standard (Wilder) definitions, written as plain loops in `api/tests/reference_indicators.py`, and pins how Sharpe and Sortino are annualised. The app's RSI, ADX and MACD value currently differ from the standard, so those tests are marked `expectedFailure` until each is fixed (issue #67). `python manage.py indicator_report BTC/USD 1day` runs the same comparison on real price history (uses TwelveData credits; `--synthetic` needs no network).
+
+**The number after the colon in `SYMBOLS` is the hours the market trades in a year** (8760 for a 24/7 market, 1638 for a US stock), not the small examples shown here; it sets how Sharpe and Sortino are annualised. `AAPL:1,BTC/USD:24` is only a test placeholder and would annualise as if the market traded for 1 or 24 hours a year.
+
 Static checks use Ruff (`pip install -r requirements-dev.txt`, then `ruff check --select E9,F63,F7,F82 .`, which flags syntax errors and undefined names).
 
 ### CI
