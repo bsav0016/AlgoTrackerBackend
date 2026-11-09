@@ -75,8 +75,9 @@ class BacktestEndpointTests(APITestCase):
         real = BacktestService.conduct_backtest
 
         def conduct(*args, **kwargs):
-            result, _ = real(*args, **kwargs)
-            return result, attempts
+            result, window = real(*args, **kwargs)
+            window.requests = attempts
+            return result, window
 
         with mock.patch("api.views.BacktestService.conduct_backtest", side_effect=conduct):
             return self.client.post(self.url, backtest_payload(), format="json")
@@ -296,3 +297,20 @@ class SymbolsAndIntervalsTests(APITestCase):
             {"interval": "1min", "monthly_charge": 100}, {"interval": "1day", "monthly_charge": 10}])
         self.assertEqual(response.data["backtest_base_cost"], 3)
         self.assertEqual(response.data["backtest_iterations"], 5)
+
+
+class BacktestDataWindowTests(BacktestEndpointTests):
+    def test_response_reports_the_data_window(self):
+        response = self.client.post(self.url, backtest_payload(), format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        window = response.data["data_window"]
+        for key in ("requested_start", "covered_start", "truncated", "requests", "warm_up_complete"):
+            self.assertIn(key, window)
+
+    def test_no_prices_in_the_period_is_refunded(self):
+        from api.services.backtest_service import NoDataForPeriod
+        before = self.credits()
+        with mock.patch("api.views.BacktestService.conduct_backtest", side_effect=NoDataForPeriod("none")):
+            response = self.client.post(self.url, backtest_payload(), format="json")
+        self.assertEqual(response.status_code, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        self.assertEqual(self.credits(), before)

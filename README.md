@@ -190,13 +190,14 @@ The production server is currently paused. When it is brought back up:
 ## Limitations
 
 - Tests cover the core logic and API but not the websocket worker or the TwelveData history loader. Expo is faked at the HTTP edge. The live signal path is tested from `RedisManager.record_tick` onward. Gaps in the feed leave missing candles (empty intervals are skipped, not filled). A candle that was open while the worker was down is stored with only the ticks it saw. Run `seed_candles` on a fresh Redis, otherwise strategies only signal once enough live candles have built up.
-- Live signals look at the last 500 candles and backtests at up to 5000, so recursive indicators (EMA, MACD, ADX) can differ slightly between the two on long histories. A strategy with no sell signal buys and holds. Windows are capped at 500.
+- Live signals look at the last 500 candles and backtests fetch extra warm-up candles before the start date (a few times the longest indicator window), so recursive indicators (EMA, RSI, MACD, ADX) start settled and differ much less from live. A strategy with no sell signal buys and holds. Windows are capped at 500.
 - Pushes are sent after the trade commits. If the worker dies between the commit and queueing the send job, or while a retry is waiting, the delivery rows stay `pending` and the sweeper re-queues them within a minute or two, so that notification is late rather than lost. Expo receipts are checked 15 minutes to 24 hours after sending; a receipt Expo never produces leaves the delivery `sent`.
 - Deploys are manual; CI only runs checks and tests.
 - Views, the Redis price loader and settings log through Python's `logging`; the websocket client still uses `print`, so their output is not leveled or routed by the logging config.
 - `requirements.txt` pins direct dependencies only, so transitive versions can still drift between builds.
 - Prices come from a third-party feed (TwelveData); symbols are limited to the configured `SYMBOLS` list.
 - Backtests are simulations on historical data and do not model fees or slippage.
+- Backtest responses include `data_window`: requested and covered start/end, candle and request counts, `truncated` with a `reason` (`request_limit` or `history_ends`), and whether warm-up was complete. A request is billed only for the data requests actually made; a period with no prices returns 422 and is refunded.
 
 ## License
 

@@ -42,7 +42,7 @@ class Command(BaseCommand):
             if symbol not in settings.SYMBOLS or interval not in settings.INTERVAL_MAP:
                 raise CommandError("Give a symbol and interval that are in SYMBOLS and INTERVALS (or use --synthetic).")
             end = datetime.datetime.now(pytz.UTC)
-            data, _ = BacktestService.get_data(symbol, interval, end - datetime.timedelta(days=options["days"]), end)
+            data = BacktestService.fetch_history(symbol, interval, end - datetime.timedelta(days=options["days"]), end).frame
             data = data.dropna()
             if len(data) < 5 * n:
                 raise CommandError(f"Only {len(data)} candles came back; need at least {5 * n}.")
