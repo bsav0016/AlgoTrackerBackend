@@ -196,7 +196,7 @@ The production server is currently paused. When it is brought back up:
 - Views, the Redis price loader and settings log through Python's `logging`; the websocket client still uses `print`, so their output is not leveled or routed by the logging config.
 - `requirements.txt` pins direct dependencies only, so transitive versions can still drift between builds.
 - Prices come from a third-party feed (TwelveData); symbols are limited to the configured `SYMBOLS` list.
-- Backtests are simulations on historical data and do not model fees or slippage.
+- Backtests charge a trading cost on each entry and exit (`BACKTEST_TRADE_COST_PERCENT`, default 0.1 of the value traded) but do not model spread or price impact. The request may set `next_candle_execution` (default false) to trade one candle after each signal. The response gives the period return after and before costs (`period_return`, `period_return_before_costs`), the compounded annual return (`percent_return`, with `annualized_is_extrapolated` true for periods under 30 days), the trade count, and a Sortino ratio built on true downside deviation.
 - Backtest responses include `data_window`: requested and covered start/end, candle and request counts, `truncated` with a `reason` (`request_limit` or `history_ends`), and whether warm-up was complete. A request is billed only for the data requests actually made; a period with no prices returns 422 and is refunded.
 
 ## License

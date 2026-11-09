@@ -186,6 +186,7 @@ class BacktestRequestSerializer(serializers.Serializer):
     start_date = serializers.DateTimeField()
     end_date = serializers.DateTimeField()
     signals = SignalSerializer(many=True)
+    next_candle_execution = serializers.BooleanField(required=False, default=False)
 
     def validate_signals(self, signals):
         return one_version(signals)

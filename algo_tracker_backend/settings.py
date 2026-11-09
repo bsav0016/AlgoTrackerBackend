@@ -294,6 +294,11 @@ try:
 except ValueError:
     BACKTEST_BASE_COST = 3
 try:
+    # Percent of the value traded, charged on each entry and exit of a backtest.
+    BACKTEST_TRADE_COST_PERCENT = max(0.0, float(os.getenv('BACKTEST_TRADE_COST_PERCENT', 0.1)))
+except ValueError:
+    BACKTEST_TRADE_COST_PERCENT = 0.1
+try:
     BACKTEST_ITERATIONS = int(os.getenv('BACKTEST_ITERATIONS', 5))
 except ValueError:
     BACKTEST_ITERATIONS = 5
