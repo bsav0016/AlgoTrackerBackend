@@ -489,10 +489,7 @@ class BacktestView(APIView):
         minutes_per_year = 525600
         annualize_factor = minutes_per_year / duration_minutes
 
-        seconds_per_year = minutes_per_year * 60
-        seconds_per_year_adj = seconds_per_year * SYMBOLS[symbol] / (365 * 24)
-        periods_per_year = seconds_per_year_adj / INTERVAL_MAP[interval]["seconds"]
-        sqrt_n = math.sqrt(periods_per_year)
+        sqrt_n = math.sqrt(BacktestService.periods_per_year(SYMBOLS[symbol], INTERVAL_MAP[interval]["seconds"]))
 
         percent_return = finite_or_zero(percent_return * annualize_factor)
         percent_return_adj = finite_or_zero(percent_return_adj * annualize_factor)
