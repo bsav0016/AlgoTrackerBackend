@@ -168,12 +168,13 @@ class GetDataTests(SimpleTestCase):
 
     def get(self, responses):
         with mock.patch("api.services.backtest_service.requests.get", side_effect=responses) as get:
-            return BacktestService.get_data("AAPL", "1day", self.START, self.END), get
+            return BacktestService.fetch_history("AAPL", "1day", self.START, self.END), get
 
     def test_returns_chronological_data_from_a_single_page(self):
         page = twelve_data_values("2024-01-01", [10, 11, 12, 13])  # API sends newest first
-        (df, attempts), get = self.get([FakeResponse(200, {"values": page})])
-        self.assertEqual(attempts, 1)
+        history, get = self.get([FakeResponse(200, {"values": page})])
+        df = history.frame
+        self.assertEqual(history.requests, 1)
         self.assertEqual(get.call_count, 1)
         self.assertEqual(list(df["close"]), [10, 11, 12, 13])
         self.assertTrue(df["datetime"].is_monotonic_increasing)
@@ -191,22 +192,52 @@ class GetDataTests(SimpleTestCase):
     def test_pages_backwards_until_the_start_date_is_covered(self):
         newer = twelve_data_values("2024-01-05", [15, 16, 17])  # does not reach the 01-03 start
         older = twelve_data_values("2024-01-01", [11, 12, 13, 14])
-        (df, attempts), get = self.get([
-            FakeResponse(200, {"values": newer}), FakeResponse(200, {"values": older})])
-        self.assertEqual(attempts, 2)
+        with mock.patch("api.services.backtest_service.PAGE_SIZE", 3):  # a full page means there may be more
+            history, get = self.get([FakeResponse(200, {"values": newer}), FakeResponse(200, {"values": older})])
+        df = history.frame
+        self.assertEqual(history.requests, 2)
+        self.assertTrue(history.start_reached)
         self.assertEqual(get.call_count, 2)
         self.assertEqual(get.call_args[1]["params"]["end_date"], "2024-01-05")
         self.assertEqual(list(df["close"]), [11, 12, 13, 14, 15, 16, 17])
 
-    def test_paging_stops_after_the_configured_iteration_limit(self):
-        def never_reaches_start(*args, **kwargs):
-            return FakeResponse(200, {"values": twelve_data_values("2024-01-05", [1, 2, 3])})
+    def test_paging_stops_after_the_configured_iteration_limit_and_says_so(self):
+        pages = iter(twelve_data_values(f"2023-12-{day:02d}", [1, 2, 3]) for day in (25, 15, 5))  # always older, never far enough
 
         with mock.patch("api.services.backtest_service.BACKTEST_ITERATIONS", 2), \
+                mock.patch("api.services.backtest_service.PAGE_SIZE", 3), \
                 mock.patch("api.services.backtest_service.requests.get",
-                           side_effect=never_reaches_start) as get:
-            BacktestService.get_data("AAPL", "1day", self.START, self.END)
+                           side_effect=lambda *a, **k: FakeResponse(200, {"values": next(pages)})) as get:
+            history = BacktestService.fetch_history("AAPL", "1day", datetime.datetime(2023, 11, 1, tzinfo=UTC), self.END)
         self.assertEqual(get.call_count, 2)  # never an unbounded number of paid API calls
+        self.assertEqual(history.requests, 2)  # and the count is what was made, not one more
+        self.assertFalse(history.start_reached)
+        self.assertEqual(history.stop_reason, "request_limit")
+
+    def test_history_that_starts_after_the_requested_start_is_reported_not_paged_forever(self):
+        history, get = self.get([FakeResponse(200, {"values": twelve_data_values("2024-01-05", [1, 2, 3])})])
+        self.assertEqual(get.call_count, 1)  # a short page means nothing older exists
+        self.assertFalse(history.start_reached)
+        self.assertEqual(history.stop_reason, "history_ends")
+
+    def test_keeps_paging_until_the_warm_up_candles_exist_before_the_start(self):
+        newest = twelve_data_values("2024-01-03", [13, 14, 15])
+        older = twelve_data_values("2023-12-28", [7, 8, 9, 10, 11, 12])
+        with mock.patch("api.services.backtest_service.PAGE_SIZE", 3):
+            with mock.patch("api.services.backtest_service.requests.get",
+                            side_effect=[FakeResponse(200, {"values": newest}), FakeResponse(200, {"values": older})]) as get:
+                history = BacktestService.fetch_history("AAPL", "1day", self.START, self.END, warm_up_candles=4)
+        self.assertEqual(get.call_count, 2)  # one page already reached the start, but held no warm-up
+        self.assertTrue(history.start_reached)
+        self.assertTrue(history.warm_up_complete)
+        self.assertGreaterEqual((history.frame["datetime"] < self.START).sum(), 4)
+
+    def test_a_candle_that_two_pages_both_hold_is_kept_once(self):
+        newer = twelve_data_values("2024-01-03", [13, 14, 15])
+        older = twelve_data_values("2023-12-31", [10, 11, 12, 13])  # ends on 01-03, as the newer page begins
+        with mock.patch("api.services.backtest_service.PAGE_SIZE", 3):
+            history, _ = self.get([FakeResponse(200, {"values": newer}), FakeResponse(200, {"values": older})])
+        self.assertTrue(history.frame["datetime"].is_unique)
 
     def test_every_request_has_a_timeout(self):
         _, get = self.get([FakeResponse(200, {"values": twelve_data_values("2024-01-01", [1, 2, 3, 4])})])
@@ -232,9 +263,9 @@ class GetDataTests(SimpleTestCase):
             self.get([FakeResponse(200, body)])
 
     def test_empty_values_list_returns_an_empty_frame(self):
-        (df, attempts), _ = self.get([FakeResponse(200, {"values": []})])
-        self.assertTrue(df.empty)
-        self.assertEqual(attempts, 1)
+        history, _ = self.get([FakeResponse(200, {"values": []})])
+        self.assertTrue(history.frame.empty)
+        self.assertEqual(history.requests, 1)
 
 
 class ConductBacktestTests(SimpleTestCase):
@@ -251,8 +282,8 @@ class ConductBacktestTests(SimpleTestCase):
                 "AAPL", "1day", start, datetime.datetime(2024, 2, 1, tzinfo=UTC), self.SIGNALS)
 
     def test_end_to_end_enters_the_uptrend_and_exits_the_downtrend(self):
-        result, attempts = self.run_backtest(datetime.datetime(2024, 1, 1))  # naive -> treated as UTC
-        self.assertEqual(attempts, 1)
+        result, window = self.run_backtest(datetime.datetime(2024, 1, 1))  # naive -> treated as UTC
+        self.assertEqual(window.requests, 1)
         self.assertEqual(list(result["owned"]), [0, 1, 1, 1, 0, 0, 0, 1, 1])
         # 10 -> held 11->12->13 -> sold at 13 -> flat -> re-bought at 11 (bar 7), ends at 12
         self.assertAlmostEqual(result["return"].iloc[3], 10 * 12 / 11 * 13 / 12)

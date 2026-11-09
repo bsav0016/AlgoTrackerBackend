@@ -24,7 +24,7 @@ from api.services.auth_service import AuthService
 from api.throttles import (LeaderboardReadAddressThrottle, LeaderboardNameAddressThrottle, SharedStrategyAddressThrottle, SharedCardAddressThrottle, LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
                            PasswordResetAddressThrottle, PasswordResetEmailThrottle,
                            PasswordResetConfirmAddressThrottle, PasswordResetConfirmUsernameThrottle)
-from api.services.backtest_service import BacktestService, MarketDataUnavailable
+from api.services.backtest_service import BacktestService, MarketDataUnavailable, NoDataForPeriod
 from api.services.card_service import render_card
 from api.services.share_page import not_shared_page, shared_strategy_page
 from api.indicators.signal import Signal
@@ -437,6 +437,10 @@ class BacktestView(APIView):
                 try:
                     return self.run_and_settle(
                         user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals)
+                except NoDataForPeriod:
+                    give_back()
+                    return Response({"detail": "There are no prices for that symbol in that period. You were not charged."},
+                                    status=status.HTTP_422_UNPROCESSABLE_ENTITY)
                 except MarketDataUnavailable:
                     give_back()
                     logger.warning("Backtest market data unavailable for %s %s", symbol, interval)
@@ -452,7 +456,8 @@ class BacktestView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def run_and_settle(self, user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals):
-        result, attempts = BacktestService.conduct_backtest(symbol, interval, start_date, end_date, signals)
+        result, data_window = BacktestService.conduct_backtest(symbol, interval, start_date, end_date, signals)
+        attempts = data_window.requests  # requests actually made, so a stopped search is not billed for one it never sent
         extra_cost = base_cost * (attempts - 1)
         if extra_cost > 0:
             try:
@@ -508,6 +513,7 @@ class BacktestView(APIView):
             "sharpe_ratio_adj": sharpe_ratio_adj,
             "sortino_ratio": sortino_ratio,
             "sortino_ratio_adj": sortino_ratio_adj,
+            "data_window": data_window.as_dict(),
             "user_account_credits": balances.account,
             "user_monthly_credits": balances.monthly
         }
