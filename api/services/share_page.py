@@ -8,6 +8,7 @@ from html import escape
 
 from django.conf import settings
 
+from api.exit_rules import describe_rules
 from api.services.card_service import DISCLAIMER, describe_signal
 
 STYLE = """
@@ -74,7 +75,7 @@ def shared_strategy_page(request, share_id, strategy):
     card = f"{root}/api/shared/{share_id}/card.png"
     page = f"{root}/s/{share_id}"
     rules = [f"Buy {describe_signal(s)}" for s in strategy.buy_signals] + \
-            [f"Sell {describe_signal(s)}" for s in strategy.sell_signals]
+            [f"Sell {describe_signal(s)}" for s in strategy.sell_signals] + describe_rules(strategy.exit_rules)
     description = f"{strategy.symbol} ({strategy.interval}): " + "; ".join(rules[:4])
     deep_link = f"{settings.SHARE_APP_SCHEME}://shared/{share_id}"
     body = (

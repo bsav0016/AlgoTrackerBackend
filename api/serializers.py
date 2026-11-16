@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from django.contrib.auth import authenticate
+from api.exit_rules import LIMITS, STOP_LOSS, TAKE_PROFIT, TRAILING_STOP
 from api.indicators.signal import CURRENT_VERSION, LEGACY_VERSION
 from api.models import CreditTransaction, CustomUser, Notification, Strategy, Trade
 from django.conf import settings
@@ -14,7 +15,7 @@ class TradeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Trade
-        fields = ['id', 'date', 'price', 'is_buy']
+        fields = ['id', 'date', 'price', 'is_buy', 'exit_reason']
 
 
 class SignalSerializer(serializers.Serializer):
@@ -49,6 +50,24 @@ class SignalSerializer(serializers.Serializer):
         return attrs
 
 
+class ExitRulesSerializer(serializers.Serializer):
+    """Percentages; a rule that is left out, null or 0 is off. See exit_rules.py."""
+    stop_loss = serializers.FloatField(required=False, allow_null=True, min_value=0, max_value=LIMITS[STOP_LOSS][1])
+    trailing_stop = serializers.FloatField(required=False, allow_null=True, min_value=0,
+                                           max_value=LIMITS[TRAILING_STOP][1])
+    take_profit = serializers.FloatField(required=False, allow_null=True, min_value=0, max_value=LIMITS[TAKE_PROFIT][1])
+
+    def validate(self, attrs):
+        rules = {}
+        for name, value in attrs.items():
+            if not value:
+                continue
+            if value < LIMITS[name][0]:
+                raise serializers.ValidationError({name: f"{name} must be at least {LIMITS[name][0]} percent"})
+            rules[name] = value
+        return rules
+
+
 def with_signal_versions(data):
     """Strategies saved before versions existed use the original definitions; say so rather than leave it blank."""
     for key in ("buy_signals", "sell_signals"):
@@ -66,6 +85,7 @@ class StrategySerializer(serializers.ModelSerializer):
     """Serializer for Strategies, including buy/sell signals and trades"""
     buy_signals = serializers.JSONField()
     sell_signals = serializers.JSONField()
+    exit_rules = serializers.JSONField(read_only=True)
     trades = TradeSerializer(many=True, read_only=True)
 
     def to_representation(self, instance):
@@ -74,8 +94,8 @@ class StrategySerializer(serializers.ModelSerializer):
     class Meta:
         model = Strategy
         fields = [
-            'id', 'title', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'strategy_return', 'asset_return',
-            'position', 'charge_user_date', 'active', 'last_processed_ts', 'trades'
+            'id', 'title', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'exit_rules', 'strategy_return',
+            'asset_return', 'position', 'charge_user_date', 'active', 'last_processed_ts', 'trades'
         ]
         read_only_fields = ['last_processed_ts']  # the live job sets it: the open time (Unix seconds) of the newest candle checked
 
@@ -86,7 +106,8 @@ class SharedStrategySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Strategy
-        fields = ['title', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'strategy_return', 'asset_return']
+        fields = ['title', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'exit_rules', 'strategy_return',
+                  'asset_return']
         read_only_fields = fields
 
     def to_representation(self, instance):
@@ -186,6 +207,7 @@ class BacktestRequestSerializer(serializers.Serializer):
     start_date = serializers.DateTimeField()
     end_date = serializers.DateTimeField()
     signals = SignalSerializer(many=True)
+    exit_rules = ExitRulesSerializer(required=False, default=dict)
     next_candle_execution = serializers.BooleanField(required=False, default=False)
 
     def validate_signals(self, signals):
@@ -197,6 +219,7 @@ class StrategyRequestSerializer(serializers.Serializer):
     symbol = serializers.CharField(max_length=50)
     interval = serializers.CharField(max_length=10)
     signals = SignalSerializer(many=True)
+    exit_rules = ExitRulesSerializer(required=False, default=dict)
 
     def validate_signals(self, signals):
         if not any(signal["buy_signal"] for signal in signals):

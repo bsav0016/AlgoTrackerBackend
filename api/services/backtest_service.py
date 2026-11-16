@@ -13,6 +13,7 @@ import base64
 import pytz
 from dataclasses import dataclass
 from typing import Optional
+from api.exit_rules import BUY, SELL, PositionState, advance
 
 TWELVE_DATA_API_KEY = settings.TWELVE_DATA_API_KEY
 BACKTEST_ITERATIONS = settings.BACKTEST_ITERATIONS
@@ -98,6 +99,7 @@ class BacktestService:
             signals: List[Signal],
             cost_rate: float = 0.0,
             delay: bool = False,
+            exit_rules: Optional[dict] = None,
     ) -> tuple[pd.DataFrame, DataWindow]:
         if start_date.tzinfo is None:
             start_date = start_date.replace(tzinfo=pytz.UTC)
@@ -119,7 +121,7 @@ class BacktestService:
             reason=None if history.start_reached else history.stop_reason,
             warm_up_candles=warm_up, warm_up_complete=history.warm_up_complete,
         )
-        return BacktestService.calculate_returns(indicator_data, cost_rate, delay), window
+        return BacktestService.calculate_returns(indicator_data, cost_rate, delay, exit_rules), window
 
     @staticmethod
     def fetch_page(symbol: str, interval: str, end_date: datetime) -> pd.DataFrame:
@@ -219,22 +221,22 @@ class BacktestService:
         return new_data
 
     @staticmethod
-    def calculate_returns(data: pd.DataFrame, cost_rate: float = 0.0, delay: bool = False) -> pd.DataFrame:
+    def calculate_returns(data: pd.DataFrame, cost_rate: float = 0.0, delay: bool = False,
+                          exit_rules: Optional[dict] = None) -> pd.DataFrame:
         """Follows the buy/sell state. `cost_rate` (a fraction, 0.001 = 0.1%) is charged on the value traded at each
-        entry and exit; `delay` makes each trade happen one candle after its signal. `return` is after costs and
-        `return_gross` before them; `owned` is the signalled state, `held` the position actually taken."""
+        entry and exit; `delay` makes each trade happen one candle after its signal. `exit_rules` (see exit_rules.py)
+        can sell earlier than a sell signal would; `exit_reason` names the rule on that candle. `return` is after
+        costs and `return_gross` before them; `owned` is the signalled state, `held` the position actually taken."""
         new_data = data.copy().reset_index(drop=True)
         new_data["owned"] = 0
+        new_data["exit_reason"] = ""
+        state = PositionState()
         for i in range(1, len(new_data)):
-            prev_owned = new_data.at[i - 1, "owned"]
-            curr_buy = new_data.at[i, "buy"]
-            curr_sell = new_data.at[i, "sell"]
-            if curr_buy and not prev_owned and not curr_sell:
-                new_data.at[i, "owned"] = 1
-            elif curr_sell and prev_owned and not curr_buy:
-                new_data.at[i, "owned"] = 0
-            else:
-                new_data.at[i, "owned"] = prev_owned
+            state, action = advance(state, bool(new_data.at[i, "buy"]), bool(new_data.at[i, "sell"]),
+                                    float(new_data.at[i, "close"]), exit_rules)
+            new_data.at[i, "owned"] = int(state.owned)
+            if action not in (None, BUY, SELL):
+                new_data.at[i, "exit_reason"] = action
         new_data["held"] = new_data["owned"].shift(1, fill_value=0) if delay else new_data["owned"]
 
         net = gross = float(new_data.at[0, "close"])
@@ -270,7 +272,7 @@ class BacktestService:
         )
 
         results["sell_signal_transition"] = (
-                (results["sell"] == True) & (results["buy"] == False) & (results["owned"].shift(1, fill_value=0) == 1)
+                (results["owned"].shift(1, fill_value=0) == 1) & (results["owned"] == 0)
         )
 
         buy_signals = results[results["buy_signal_transition"]]

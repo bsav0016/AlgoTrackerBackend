@@ -419,6 +419,7 @@ class BacktestView(APIView):
 
                 signals = [Signal(**signal) for signal in signals]
                 delay = serializer.validated_data['next_candle_execution']
+                exit_rules = serializer.validated_data['exit_rules']
 
                 # Reserve the cost of one data request before spending any market-data quota; settle the
                 # extra requests once we know how many it took, and give everything back if the run fails.
@@ -437,7 +438,8 @@ class BacktestView(APIView):
 
                 try:
                     return self.run_and_settle(
-                        user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals, delay)
+                        user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals, delay,
+                        exit_rules)
                 except NoDataForPeriod:
                     give_back()
                     return Response({"detail": "There are no prices for that symbol in that period. You were not charged."},
@@ -457,10 +459,10 @@ class BacktestView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def run_and_settle(self, user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals,
-                       delay=False):
+                       delay=False, exit_rules=None):
         cost_percent = settings.BACKTEST_TRADE_COST_PERCENT
         result, data_window = BacktestService.conduct_backtest(
-            symbol, interval, start_date, end_date, signals, cost_percent / 100, delay)
+            symbol, interval, start_date, end_date, signals, cost_percent / 100, delay, exit_rules)
         attempts = data_window.requests  # requests actually made, so a stopped search is not billed for one it never sent
         extra_cost = base_cost * (attempts - 1)
         if extra_cost > 0:
@@ -477,7 +479,7 @@ class BacktestView(APIView):
         processed_result = []
         for entry in raw_result:
             indicators = {}
-            core_fields = ["datetime", "close", "buy", "sell", "owned", "return"]
+            core_fields = ["datetime", "close", "buy", "sell", "owned", "return", "exit_reason"]
 
             for key, value in entry.items():
                 if key not in core_fields:
@@ -559,7 +561,8 @@ class StrategyView(APIView):
                     user=request.user,
                     title=title,
                     symbol=symbol,
-                    interval=interval
+                    interval=interval,
+                    exit_rules=serializer.validated_data['exit_rules'],
                 )
                 strategy.save()
                 strategy.add_signals(signals)

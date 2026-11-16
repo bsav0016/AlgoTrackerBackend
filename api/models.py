@@ -7,6 +7,7 @@ from django.contrib.auth.models import BaseUserManager, AbstractBaseUser, Permis
 from django.utils.translation import gettext_lazy as _
 from api.indicators.signal import Signal, LEGACY_VERSION
 from typing import List
+from api.exit_rules import BUY, LABELS, SELL, PositionState, advance
 from api.services.signal_service import SignalService
 from api.services.backtest_service import BacktestService
 from decimal import Decimal
@@ -137,6 +138,12 @@ class Strategy(models.Model):
     # When live tracking began: set on creation and again on activation, the moment `strategy_return` and
     # `asset_return` start from 1. Empty for strategies from before it was recorded, and for drafts.
     started_at = models.DateTimeField(null=True, blank=True, default=timezone.now)
+    # Optional exits that depend on the entry price, as {"stop_loss": 5, "take_profit": 10, "trailing_stop": 4}
+    # (percent); see exit_rules.py. Empty means the strategy only trades on its signals.
+    exit_rules = models.JSONField(default=dict, blank=True)
+    entry_price = models.FloatField(null=True, blank=True)  # the close it bought at, while holding
+    peak_price = models.FloatField(null=True, blank=True)  # the highest close since then (a trailing stop trails it)
+    exit_blocked = models.BooleanField(default=False)  # a rule sold while the buy signals held: wait for them to clear
 
     def add_signals(self, signals: List[Signal]):
         updated_buy_signals = []
@@ -220,18 +227,23 @@ class Strategy(models.Model):
             self.strategy_return = self.strategy_return * asset_change
         self.asset_return = self.asset_return * asset_change
 
-        if current_close["buy"] and not current_close["sell"] and self.position < 2:
+        before = PositionState(owned=self.position >= 2, entry_price=self.entry_price, peak_price=self.peak_price,
+                               blocked=self.exit_blocked)
+        after, action = advance(before, bool(current_close["buy"]), bool(current_close["sell"]),
+                                float(current_close["close"]), self.exit_rules)
+        self.entry_price, self.peak_price, self.exit_blocked = after.entry_price, after.peak_price, after.blocked
+        if action == BUY:
             self.position = 3
             trade = Trade.objects.create(strategy=self, price=current_close["close"], is_buy=True)
             self.send_notifications(trade, f"{self.title} triggered a buy signal!")
-        elif current_close["sell"] and not current_close["buy"] and self.position >= 2:
+        elif action is not None:  # a sell signal or an exit rule
             self.position = 0
-            trade = Trade.objects.create(strategy=self, price=current_close["close"], is_buy=False)
-            self.send_notifications(trade, f"{self.title} triggered a sell signal!")
-        elif self.position < 2:
-            self.position = 1
+            reason = "" if action == SELL else action
+            trade = Trade.objects.create(strategy=self, price=current_close["close"], is_buy=False, exit_reason=reason)
+            what = "triggered a sell signal" if action == SELL else f"hit its {LABELS[action]} and sold"
+            self.send_notifications(trade, f"{self.title} {what}!")
         else:
-            self.position = 2
+            self.position = 2 if after.owned else 1
 
         if timezone.now() > self.charge_user_date:
             self.charge_user(INTERVAL_MAP[self.interval]['monthly_charge'])
@@ -239,27 +251,31 @@ class Strategy(models.Model):
                 return
         if ts is not None:
             self.last_processed_ts = ts
-        self.save(update_fields=["position", "strategy_return", "asset_return", "charge_user_date", "last_processed_ts"])
+        self.save(update_fields=["position", "strategy_return", "asset_return", "charge_user_date", "last_processed_ts",
+                                 "entry_price", "peak_price", "exit_blocked"])
         logger.info("Finished processing data")
 
     def clone_for(self, user):
         """A draft copy for `user`: the same rules, symbol, interval and title, not tracked or billed until activated."""
         return Strategy.objects.create(
             user=user, title=self.title, symbol=self.symbol, interval=self.interval,
-            buy_signals=self.buy_signals, sell_signals=self.sell_signals, active=False, cloned_from=self,
+            buy_signals=self.buy_signals, sell_signals=self.sell_signals, exit_rules=self.exit_rules, active=False,
+            cloned_from=self,
             started_at=None)
 
     def activate(self):
         """Start tracking a draft now: fresh returns and position, and the first monthly charge 30 days away."""
         self.active = True
         self.position = 1
+        self.entry_price = self.peak_price = None
+        self.exit_blocked = False
         self.strategy_return = 1
         self.asset_return = 1
         self.last_processed_ts = None
         self.charge_user_date = get_thirty_days_away()
         self.started_at = timezone.now()
         self.save(update_fields=["active", "position", "strategy_return", "asset_return", "last_processed_ts",
-                                 "charge_user_date", "started_at"])
+                                 "charge_user_date", "started_at", "entry_price", "peak_price", "exit_blocked"])
 
     def send_notifications(self, trade, message):
         """Record that `trade` owes the user a push, in the same transaction as the trade.
@@ -371,6 +387,7 @@ class Trade(models.Model):
     date = models.DateTimeField(default=timezone.now)
     price = models.DecimalField(default=0, max_digits=20, decimal_places=2)
     is_buy = models.BooleanField()
+    exit_reason = models.CharField(max_length=20, blank=True, default="")  # the exit rule that made this sell, if one did
 
 
 class Notification(models.Model):
