@@ -7,6 +7,7 @@ so nothing is kept in global state between requests.
 import io
 
 from django.utils import timezone
+from api.exit_rules import describe_rules
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.dates import AutoDateLocator, ConciseDateFormatter
 from matplotlib.figure import Figure
@@ -78,6 +79,9 @@ def render_card(strategy, trades, now=None):
 
     rules = [f"Buy  {describe_signal(s)}" for s in strategy.buy_signals][:3]
     rules += [f"Sell  {describe_signal(s)}" for s in strategy.sell_signals][:3]
+    exits = describe_rules(strategy.exit_rules)
+    if exits:
+        rules = rules[:5] + ["Exit  " + ", ".join(exits)]
     for i, line in enumerate(rules[:6]):
         figure.text(0.05, 0.70 - i * 0.055, _safe(line), color=MUTED, fontsize=15)
 
