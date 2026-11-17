@@ -167,6 +167,25 @@ class BacktestExitTests(SimpleTestCase):
         self.assertEqual(list(result["held"]), [0, 0, 1, 0, 0])
 
 
+class ChartMarkerTests(SimpleTestCase):
+    def test_markers_follow_the_position_not_the_buy_signals_that_were_blocked(self):
+        closes = [100, 100, 111, 112, 113, 90, 91]
+        buys = [False, True, True, True, True, False, True]
+        result = BacktestService.calculate_returns(frame(closes, buys), exit_rules={TAKE_PROFIT: 10})
+        self.assertEqual(list(result["owned"]), [0, 1, 0, 0, 0, 0, 1])  # sold at 111, blocked while buys hold
+        opened, closed = BacktestService.trade_markers(result)
+        self.assertEqual(list(opened.index), [1, 6])  # not 3 and 4, where the buy signals held but it did not buy
+        self.assertEqual(list(closed.index), [2])
+
+    def test_without_rules_markers_are_the_signal_changes_as_before(self):
+        closes = [100, 102, 105, 103, 99, 101]
+        buys = [False, True, True, False, False, True]
+        sells = [False, False, False, True, True, False]
+        result = BacktestService.calculate_returns(frame(closes, buys, sells))
+        opened, closed = BacktestService.trade_markers(result)
+        self.assertEqual((list(opened.index), list(closed.index)), ([1, 5], [3]))
+
+
 class BacktestEndpointExitTests(APITestCase):
     def setUp(self):
         self.client.force_authenticate(make_user())
