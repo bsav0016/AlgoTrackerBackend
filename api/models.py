@@ -427,6 +427,29 @@ class PushDelivery(models.Model):
         indexes = [models.Index(fields=["status", "next_attempt_at"])]
 
 
+class SavedBacktest(models.Model):
+    """A finished backtest, kept for its owner. See saved_backtests.py for what is stored and why."""
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="saved_backtests")
+    created_at = models.DateTimeField(default=timezone.now)
+    label = models.CharField(max_length=60, blank=True, default="")
+    symbol = models.CharField(max_length=20)
+    interval = models.CharField(max_length=10)
+    requested_start = models.DateTimeField()
+    requested_end = models.DateTimeField()
+    covered_start = models.DateTimeField()  # what the market data actually covered (see DataWindow)
+    covered_end = models.DateTimeField()
+    buy_signals = models.JSONField(default=list)
+    sell_signals = models.JSONField(default=list)
+    exit_rules = models.JSONField(default=dict, blank=True)
+    next_candle_execution = models.BooleanField(default=False)
+    cost_percent = models.FloatField(default=0)
+    summary = models.JSONField(default=dict)  # the response's numbers, without the rows
+    series = models.JSONField(default=list)  # thinned rows: datetime, close, owned, return, exit_reason
+
+    class Meta:
+        indexes = [models.Index(fields=["user", "-id"])]
+
+
 #Not using it now but may use it later?
 class Backtest(models.Model):
     strategy = models.ForeignKey(Strategy, on_delete=models.CASCADE, related_name="backtests")

@@ -16,9 +16,9 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from api.serializers import (SharedStrategySerializer, StrategySerializer, UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
                              CreditTransactionSerializer, NotificationSerializer,
                              BacktestRequestSerializer, StrategyRequestSerializer)
-from api import credits, leaderboard, leaderboard_read
+from api import credits, leaderboard, leaderboard_read, saved_backtests
 from api.models import (Strategy, StrategyShare, Notification, PushDevice, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
-                        RevenueCatConfirmation)
+                        RevenueCatConfirmation, SavedBacktest)
 from api.push_sweep import backlog as push_backlog
 from api.services.auth_service import AuthService
 from api.throttles import (LeaderboardReadAddressThrottle, LeaderboardNameAddressThrottle, SharedStrategyAddressThrottle, SharedCardAddressThrottle, LoginAddressThrottle, LoginUsernameThrottle, RegisterAddressThrottle,
@@ -537,7 +537,84 @@ class BacktestView(APIView):
             "user_monthly_credits": balances.monthly
         }
 
+        # Keep the run for the user. It is paid for, so a failure to save must not fail it: it just has no id.
+        try:
+            response_data["id"] = saved_backtests.save(
+                user, symbol=symbol, interval=interval, start_date=start_date, end_date=end_date, signals=signals,
+                exit_rules=exit_rules, delay=delay, cost_percent=cost_percent, response=response_data).pk
+        except Exception:
+            logger.exception("Could not save a backtest")
+            response_data["id"] = None
+
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+class SavedBacktestListView(APIView):
+    """The signed-in user's own saved backtests, newest first, a page at a time (same paging as credit history).
+
+    `?limit=` (1 to 100, default 50) sizes the page; pass the previous response's `next_before` as `?before=`.
+    """
+    authentication_classes = [JWTAuthentication, ]
+    permission_classes = [IsAuthenticated, ]
+    DEFAULT_LIMIT = 50
+    MAX_LIMIT = 100
+
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get("limit", self.DEFAULT_LIMIT))
+            before = request.query_params.get("before")
+            before = int(before) if before is not None else None
+        except ValueError:
+            return Response({"detail": "limit and before must be whole numbers"}, status=status.HTTP_400_BAD_REQUEST)
+        limit = max(1, min(limit, self.MAX_LIMIT))
+
+        rows = SavedBacktest.objects.filter(user=request.user).order_by("-id")
+        if before is not None:
+            rows = rows.filter(id__lt=before)
+        page = list(rows[:limit + 1])
+        has_more = len(page) > limit
+        page = page[:limit]
+        return Response({
+            "results": [saved_backtests.list_item(saved) for saved in page],
+            "next_before": page[-1].id if has_more else None,
+        }, status=status.HTTP_200_OK)
+
+
+class SavedBacktestDetailView(APIView):
+    """One saved backtest of the signed-in user. Someone else's id is a 404, the same as one that does not exist."""
+    authentication_classes = [JWTAuthentication, ]
+    permission_classes = [IsAuthenticated, ]
+    MAX_LABEL = 60
+
+    def saved(self, request, pk):
+        return SavedBacktest.objects.filter(pk=pk, user=request.user).first()
+
+    def get(self, request, pk):
+        saved = self.saved(request, pk)
+        if saved is None:
+            return Response({"detail": "Backtest not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(saved_backtests.detail(saved), status=status.HTTP_200_OK)
+
+    def patch(self, request, pk):
+        saved = self.saved(request, pk)
+        if saved is None:
+            return Response({"detail": "Backtest not found."}, status=status.HTTP_404_NOT_FOUND)
+        label = request.data.get("label")
+        if not isinstance(label, str):
+            return Response({"label": "A label is required (it may be empty)."}, status=status.HTTP_400_BAD_REQUEST)
+        label = label.strip()
+        if len(label) > self.MAX_LABEL:
+            return Response({"label": f"At most {self.MAX_LABEL} characters."}, status=status.HTTP_400_BAD_REQUEST)
+        saved.label = label
+        saved.save(update_fields=["label"])
+        return Response(saved_backtests.list_item(saved), status=status.HTTP_200_OK)
+
+    def delete(self, request, pk):
+        saved = self.saved(request, pk)
+        if saved is None:
+            return Response({"detail": "Backtest not found."}, status=status.HTTP_404_NOT_FOUND)
+        saved.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class StrategyView(APIView):
