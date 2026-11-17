@@ -258,6 +258,14 @@ class BacktestService:
         return new_data
 
     @staticmethod
+    def trade_markers(results: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """The candles where the position was opened and where it was closed, for the chart. They follow the position
+        itself, not the signals: after an exit rule sells while the buy signals still hold, the strategy stays out
+        until they clear, and those candles are not buys."""
+        previous = results["owned"].shift(1, fill_value=0)
+        return results[(results["owned"] == 1) & (previous == 0)], results[(previous == 1) & (results["owned"] == 0)]
+
+    @staticmethod
     def generate_backtest_chart(backtest_results: pd.DataFrame) -> tuple[str, str]:
         if backtest_results.empty:
             raise ValueError("Backtest results are empty. Cannot generate chart.")
@@ -267,16 +275,7 @@ class BacktestService:
         prices = results["close"]
         returns = results["return"]
 
-        results["buy_signal_transition"] = (
-                (results["buy"] == True) & (results["sell"] == False) & (results["owned"].shift(1, fill_value=0) == 0)
-        )
-
-        results["sell_signal_transition"] = (
-                (results["owned"].shift(1, fill_value=0) == 1) & (results["owned"] == 0)
-        )
-
-        buy_signals = results[results["buy_signal_transition"]]
-        sell_signals = results[results["sell_signal_transition"]]
+        buy_signals, sell_signals = BacktestService.trade_markers(results)
 
         min_value = min(prices.min(), returns.min())
         max_value = max(prices.max(), returns.max())
