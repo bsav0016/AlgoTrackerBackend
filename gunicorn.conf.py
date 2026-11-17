@@ -8,7 +8,7 @@ import os
 
 bind = "0.0.0.0:8000"
 
-# GUNICORN_WORKERS. Each worker holds pandas and matplotlib in memory (roughly 150 to 300 MB), so size this to the
+# GUNICORN_WORKERS. Each worker holds Django, pandas and numpy in memory, so size this to the
 # droplet: 3 is comfortable on 2 GB.
 workers = int(os.getenv("GUNICORN_WORKERS", "3"))
 worker_class = "gthread"

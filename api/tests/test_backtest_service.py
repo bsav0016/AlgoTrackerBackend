@@ -1,5 +1,4 @@
 import math
-import base64
 import datetime
 from unittest import mock
 
@@ -179,22 +178,6 @@ class TradingCostTests(SimpleTestCase):
         self.assertAlmostEqual(BacktestService.annualize(0.05, year / 2), 1.05 ** 2 - 1)
         self.assertEqual(BacktestService.annualize(-1.5, 60), -1.0)
         self.assertEqual(BacktestService.annualize(0.5, 1e-9), float("inf"))
-
-
-class ChartTests(SimpleTestCase):
-    def test_chart_returns_two_base64_pngs(self):
-        data = pd.DataFrame({
-            "datetime": pd.date_range("2024-01-01", periods=4, tz="UTC"),
-            "close": [100.0, 110, 105, 120], "return": [100.0, 100, 95, 109],
-            "buy": [False, True, False, False], "sell": [False, False, True, False],
-            "owned": [0, 1, 0, 0],
-        })
-        for image in BacktestService.generate_backtest_chart(data):
-            self.assertTrue(base64.b64decode(image).startswith(b"\x89PNG"))
-
-    def test_chart_rejects_empty_results(self):
-        with self.assertRaises(ValueError):
-            BacktestService.generate_backtest_chart(pd.DataFrame())
 
 
 class GetDataTests(SimpleTestCase):

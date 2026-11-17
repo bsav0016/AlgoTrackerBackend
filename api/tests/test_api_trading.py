@@ -60,33 +60,21 @@ class BacktestEndpointTests(APITestCase):
         for key in ("percent_return", "percent_return_adj", "sharpe_ratio", "sharpe_ratio_adj",
                     "sortino_ratio", "sortino_ratio_adj"):
             self.assertTrue(math.isfinite(data[key]), key)
-        self.assertTrue(data["image"] and data["image_no_signals"])
         self.assertEqual(self.credits(), (500 - 3, 0))  # BACKTEST_BASE_COST x one data request
         self.assertEqual(data["user_monthly_credits"], 497)
 
-    def test_images_are_sent_unless_the_app_says_it_draws_the_chart_itself(self):
-        left_out = self.client.post(self.url, backtest_payload(), format="json").data
-        asked_for = self.client.post(self.url, backtest_payload(include_images=True), format="json").data
-        for data in (left_out, asked_for):
-            self.assertTrue(data["image"] and data["image_no_signals"])
-
-    def test_without_images_nothing_is_drawn_and_everything_else_is_the_same(self):
-        with_images = self.client.post(self.url, backtest_payload(), format="json").data
-        with mock.patch.object(BacktestService, "generate_backtest_chart") as draw:
-            without = self.client.post(self.url, backtest_payload(include_images=False), format="json")
-        self.assertEqual(without.status_code, status.HTTP_200_OK)
-        draw.assert_not_called()
-        data = without.data
+    def test_no_chart_images_are_drawn_and_the_rows_hold_what_the_app_needs_to_draw_it(self):
+        data = self.client.post(self.url, backtest_payload(), format="json").data
         self.assertEqual((data["image"], data["image_no_signals"]), ("", ""))
-        ignored = {"image", "image_no_signals", "user_account_credits", "user_monthly_credits"}
-        self.assertEqual({k: v for k, v in data.items() if k not in ignored},
-                         {k: v for k, v in with_images.items() if k not in ignored})
-        self.assertEqual(self.credits(), (500 - 6, 0))  # charged the same either way: two runs of 3 credits
+        row = data["result"][1]
+        for key in ("datetime", "close", "owned", "return", "exit_reason"):
+            self.assertIn(key, row)
 
-    def test_images_must_be_a_boolean(self):
-        response = self.client.post(self.url, backtest_payload(include_images="maybe"), format="json")
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("include_images", response.data)
+    def test_an_app_that_still_sends_include_images_is_not_refused(self):
+        for value in (True, False, "maybe"):
+            response = self.client.post(self.url, backtest_payload(include_images=value), format="json")
+            self.assertEqual(response.status_code, status.HTTP_200_OK, value)
+            self.assertEqual(response.data["image"], "")
 
     def test_the_cost_is_reserved_in_the_ledger(self):
         self.client.post(self.url, backtest_payload(), format="json")
