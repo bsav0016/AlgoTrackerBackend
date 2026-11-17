@@ -420,6 +420,7 @@ class BacktestView(APIView):
                 signals = [Signal(**signal) for signal in signals]
                 delay = serializer.validated_data['next_candle_execution']
                 exit_rules = serializer.validated_data['exit_rules']
+                include_images = serializer.validated_data['include_images']
 
                 # Reserve the cost of one data request before spending any market-data quota; settle the
                 # extra requests once we know how many it took, and give everything back if the run fails.
@@ -439,7 +440,7 @@ class BacktestView(APIView):
                 try:
                     return self.run_and_settle(
                         user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals, delay,
-                        exit_rules)
+                        exit_rules, include_images)
                 except NoDataForPeriod:
                     give_back()
                     return Response({"detail": "There are no prices for that symbol in that period. You were not charged."},
@@ -459,7 +460,7 @@ class BacktestView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def run_and_settle(self, user, spend_key, base_cost, balances, symbol, interval, start_date, end_date, signals,
-                       delay=False, exit_rules=None):
+                       delay=False, exit_rules=None, include_images=True):
         cost_percent = settings.BACKTEST_TRADE_COST_PERCENT
         result, data_window = BacktestService.conduct_backtest(
             symbol, interval, start_date, end_date, signals, cost_percent / 100, delay, exit_rules)
@@ -491,7 +492,7 @@ class BacktestView(APIView):
 
             processed_result.append(transformed_entry)
 
-        img_base64, img_base64_no_signals = BacktestService.generate_backtest_chart(result)
+        img_base64, img_base64_no_signals = BacktestService.generate_backtest_chart(result) if include_images else ("", "")
         period_return, period_return_adj = BacktestService.calculate_percent_return(result)
         gross_return, _ = BacktestService.calculate_percent_return(result.assign(**{"return": result["return_gross"]}))
         sharpe_ratio, sharpe_ratio_adj = BacktestService.calculate_sharpe_ratio(result)
