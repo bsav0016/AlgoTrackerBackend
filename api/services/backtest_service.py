@@ -6,10 +6,6 @@ from api.indicators.signal import Signal
 import datetime
 import math
 from typing import List
-import matplotlib
-import matplotlib.pyplot as plt
-import io
-import base64
 import pytz
 from dataclasses import dataclass
 from typing import Optional
@@ -25,8 +21,6 @@ PAGE_SIZE = 5000  # candles TwelveData returns per request
 
 class MarketDataUnavailable(Exception):
     """TwelveData could not be reached in time (timeout, connection error). Safe to try again later."""
-
-matplotlib.use("Agg")
 
 
 @dataclass
@@ -256,72 +250,6 @@ class BacktestService:
         new_data["return_gross"] = gross_values
         new_data["trades"] = trades
         return new_data
-
-    @staticmethod
-    def trade_markers(results: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """The candles where the position was opened and where it was closed, for the chart. They follow the position
-        itself, not the signals: after an exit rule sells while the buy signals still hold, the strategy stays out
-        until they clear, and those candles are not buys."""
-        previous = results["owned"].shift(1, fill_value=0)
-        return results[(results["owned"] == 1) & (previous == 0)], results[(previous == 1) & (results["owned"] == 0)]
-
-    @staticmethod
-    def generate_backtest_chart(backtest_results: pd.DataFrame) -> tuple[str, str]:
-        if backtest_results.empty:
-            raise ValueError("Backtest results are empty. Cannot generate chart.")
-        results = backtest_results.copy().dropna()
-
-        dates = results["datetime"]
-        prices = results["close"]
-        returns = results["return"]
-
-        buy_signals, sell_signals = BacktestService.trade_markers(results)
-
-        min_value = min(prices.min(), returns.min())
-        max_value = max(prices.max(), returns.max())
-        buffer = (max_value - min_value) * 0.02
-
-        fig, ax1 = plt.subplots(figsize=(10, 5))
-
-        ax1.plot(dates, prices, color="blue", label="Asset Price")
-        ax1.plot(dates, returns, color="red", label="Strategy Value")
-        ax1.set_xlabel("Date")
-        ax1.set_ylabel("Price")
-        ax1.set_ylim(min_value - buffer, max_value + buffer)
-        ax1.grid(True, which='both', axis='both', linestyle='--', color='gray', alpha=0.5)
-
-        fig.autofmt_xdate()
-        ax1.legend(loc="upper left")
-
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", bbox_inches="tight")
-        buf.seek(0)
-        img_base64_no_signals = base64.b64encode(buf.read()).decode("utf-8")
-        buf.close()
-
-        for idx, date in enumerate(buy_signals["datetime"]):
-            if idx == 0:
-                ax1.axvline(x=date, color="green", linewidth=0.5, label="Buy Signal")
-            else:
-                ax1.axvline(x=date, color="green", linewidth=0.5)
-
-        for idx, date in enumerate(sell_signals["datetime"]):
-            if idx == 0:
-                ax1.axvline(x=date, color="red", linewidth=0.5, label="Sell Signal")
-            else:
-                ax1.axvline(x=date, color="red", linewidth=0.5)
-
-        ax1.legend(loc="upper left")
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", bbox_inches="tight")
-        buf.seek(0)
-        img_base64 = base64.b64encode(buf.read()).decode("utf-8")
-        buf.close()
-
-        plt.close(fig)
-        del fig
-
-        return img_base64, img_base64_no_signals
 
     @staticmethod
     def calculate_sharpe_ratio(backtest_results: pd.DataFrame) -> tuple[float, float]:

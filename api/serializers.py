@@ -209,9 +209,6 @@ class BacktestRequestSerializer(serializers.Serializer):
     signals = SignalSerializer(many=True)
     exit_rules = ExitRulesSerializer(required=False, default=dict)
     next_candle_execution = serializers.BooleanField(required=False, default=False)
-    # Older app builds draw nothing themselves and rely on the two chart images, so they are sent unless the app
-    # says it draws the chart from `result` (false). Then the fields are still there, but empty.
-    include_images = serializers.BooleanField(required=False, default=True)
 
     def validate_signals(self, signals):
         return one_version(signals)
