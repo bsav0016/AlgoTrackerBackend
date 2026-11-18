@@ -18,6 +18,9 @@ SUMMARY_KEYS = (
     "percent_return", "percent_return_adj", "period_return", "period_return_adj", "period_return_before_costs",
     "annualized_is_extrapolated", "trade_cost_percent", "trades", "sharpe_ratio", "sharpe_ratio_adj",
     "sortino_ratio", "sortino_ratio_adj", "data_window",
+    # The plain-language numbers (trade_stats.py). A run saved before they existed simply lacks them.
+    "max_drawdown", "asset_max_drawdown", "closed_trades", "winning_trades", "win_rate", "average_trade",
+    "best_trade", "worst_trade", "time_invested", "open_trade",
 )
 
 

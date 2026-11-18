@@ -16,7 +16,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from api.serializers import (SharedStrategySerializer, StrategySerializer, UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
                              CreditTransactionSerializer, NotificationSerializer,
                              BacktestRequestSerializer, StrategyRequestSerializer)
-from api import credits, leaderboard, leaderboard_read, saved_backtests
+from api import credits, leaderboard, leaderboard_read, saved_backtests, trade_stats
 from api.models import (Strategy, StrategyShare, Notification, PushDevice, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
                         RevenueCatConfirmation, SavedBacktest)
 from api.push_sweep import backlog as push_backlog
@@ -533,6 +533,7 @@ class BacktestView(APIView):
             "sortino_ratio": sortino_ratio,
             "sortino_ratio_adj": sortino_ratio_adj,
             "data_window": data_window.as_dict(),
+            **trade_stats.summarize(result),
             "user_account_credits": balances.account,
             "user_monthly_credits": balances.monthly
         }
