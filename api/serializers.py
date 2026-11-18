@@ -4,7 +4,9 @@ from django.contrib.auth import authenticate
 from api.exit_rules import LIMITS, STOP_LOSS, TAKE_PROFIT, TRAILING_STOP
 from api.indicators.signal import CURRENT_VERSION, LEGACY_VERSION
 from api.models import CreditTransaction, CustomUser, Notification, Strategy, Trade
+from api.services.card_service import equity_points
 from django.conf import settings
+from django.db.models import prefetch_related_objects
 import math
 
 PROMO_CODES = settings.PROMO_CODES
@@ -87,15 +89,26 @@ class StrategySerializer(serializers.ModelSerializer):
     sell_signals = serializers.JSONField()
     exit_rules = serializers.JSONField(read_only=True)
     trades = TradeSerializer(many=True, read_only=True)
+    equity_curve = serializers.SerializerMethodField()
+
+    def get_equity_curve(self, strategy):
+        """The strategy's value over time, from the same function the share card draws from (`equity_points`), so the
+        screen and the card cannot disagree. Points are `{"date", "multiple"}`, the multiple starting at 1.0 on the
+        first buy; empty until there is a finished round trip or an open position to draw."""
+        trades = sorted(strategy.trades.all(), key=lambda trade: (trade.date, trade.pk))  # uses a prefetch if there is one
+        return [{"date": moment, "multiple": multiple}
+                for moment, multiple in equity_points(trades, strategy.strategy_return)]
 
     def to_representation(self, instance):
+        # The trades are used twice (the list and the curve); load them once. Does nothing if already prefetched.
+        prefetch_related_objects([instance], "trades")
         return with_signal_versions(super().to_representation(instance))
 
     class Meta:
         model = Strategy
         fields = [
             'id', 'title', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'exit_rules', 'strategy_return',
-            'asset_return', 'position', 'charge_user_date', 'active', 'last_processed_ts', 'trades'
+            'asset_return', 'position', 'charge_user_date', 'active', 'last_processed_ts', 'trades', 'equity_curve'
         ]
         read_only_fields = ['last_processed_ts']  # the live job sets it: the open time (Unix seconds) of the newest candle checked
 
