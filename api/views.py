@@ -15,7 +15,7 @@ from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, Bl
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from api.serializers import (SharedStrategySerializer, StrategySerializer, UserRegistrationSerializer, LoginSerializer, CustomUserSerializer,
                              CreditTransactionSerializer, NotificationSerializer,
-                             BacktestRequestSerializer, StrategyRequestSerializer)
+                             BacktestRequestSerializer, StrategyRequestSerializer, StrategyEditSerializer)
 from api import credits, leaderboard, leaderboard_read, saved_backtests, trade_stats
 from api.models import (Strategy, StrategyShare, Notification, PushDevice, CustomUser, CreditTransaction, PaymentIntent, RevenueCatCustomer,
                         RevenueCatConfirmation, SavedBacktest)
@@ -653,6 +653,25 @@ class StrategyView(APIView):
                 return Response({"detail": "Internal Error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, pk):
+        """Edit the title, signals or exit rules of the caller's own strategy. Someone else's id is a 404, as for shares.
+        The row is locked so an edit cannot land in the middle of the live job checking a candle."""
+        try:
+            with transaction.atomic():
+                strategy = Strategy.objects.select_for_update().filter(pk=pk, user=request.user).first()
+                if strategy is None:
+                    return Response({"detail": "Strategy not found."}, status=status.HTTP_404_NOT_FOUND)
+                serializer = StrategyEditSerializer(data=request.data)
+                if not serializer.is_valid():
+                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                data = serializer.validated_data
+                signals = [Signal(**signal) for signal in data["signals"]] if "signals" in data else None
+                strategy.apply_edit(title=data.get("title"), signals=signals, exit_rules=data.get("exit_rules"))
+            return Response(StrategySerializer(strategy).data, status=status.HTTP_200_OK)
+        except Exception:
+            logger.exception("Strategy edit internal error")
+            return Response({"detail": "Internal Error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def delete(self, request, pk):
         try:
