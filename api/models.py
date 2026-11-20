@@ -13,6 +13,7 @@ from api.services.backtest_service import BacktestService
 from decimal import Decimal
 from django.utils import timezone
 from datetime import timedelta
+import json
 import logging
 import secrets
 
@@ -144,6 +145,14 @@ class Strategy(models.Model):
     entry_price = models.FloatField(null=True, blank=True)  # the close it bought at, while holding
     peak_price = models.FloatField(null=True, blank=True)  # the highest close since then (a trailing stop trails it)
     exit_blocked = models.BooleanField(default=False)  # a rule sold while the buy signals held: wait for them to clear
+    # Editing the rules of a tracked strategy (see apply_edit). The leaderboard counts only what a strategy earned since
+    # its rules last changed, so it cannot be tuned after seeing how it did: the clock restarts, and the returns at that
+    # moment become the baseline the board measures from. `strategy_return` and `asset_return` themselves keep the whole
+    # history, which is what the strategy's own screen shows.
+    rules_changed_at = models.DateTimeField(null=True, blank=True)
+    baseline_strategy_return = models.DecimalField(default=1, max_digits=10, decimal_places=5)
+    baseline_asset_return = models.DecimalField(default=1, max_digits=10, decimal_places=5)
+    edit_log = models.JSONField(default=list, blank=True)  # the last MAX_EDIT_LOG rule edits: {date, changes}
 
     def add_signals(self, signals: List[Signal]):
         updated_buy_signals = []
@@ -170,6 +179,74 @@ class Strategy(models.Model):
         self.buy_signals = updated_buy_signals
         self.sell_signals = updated_sell_signals
         self.save(update_fields=["buy_signals", "sell_signals"])
+
+    MAX_EDIT_LOG = 20
+
+    @staticmethod
+    def signal_dicts(signals: List[Signal]):
+        """The stored form of a list of signals: (buy signals, sell signals), one dict each."""
+        buy, sell = [], []
+        for signal in signals:
+            data = {
+                "name": signal.name, "above_target": signal.above_target, "buy_signal": signal.buy_signal,
+                "target_value": signal.target_value, "window": signal.window, "fast_window": signal.fast_window,
+                "slow_window": signal.slow_window, "signal_window": signal.signal_window, "version": signal.version,
+            }
+            (buy if signal.buy_signal else sell).append(data)
+        return buy, sell
+
+    @staticmethod
+    def _same_signals(stored, new):
+        """Whether two lists of signals do the same thing: order does not matter (they are all required at once), and a
+        signal stored before versions existed is version 1."""
+        key = lambda items: sorted(json.dumps({**item, "version": item.get("version", LEGACY_VERSION)}, sort_keys=True)
+                                   for item in items)
+        return key(stored) == key(new)
+
+    def apply_edit(self, title=None, signals=None, exit_rules=None, now=None):
+        """Change this strategy's title, signals or exit rules. The caller holds the row lock (select_for_update).
+
+        Position, entry price, returns and trades are kept, and the live job reads the new rules from the next candle, so
+        a position bought under the old rules is judged by the new ones. The symbol and the interval are not editable:
+        a different market is a different strategy, and the interval sets the monthly charge.
+
+        A change to the *rules* (signals or exit rules) on a tracked strategy is recorded, restarts its leaderboard clock
+        and sets its leaderboard baseline to the returns it has now. A new title is not a rules change and is applied
+        quietly, and so is any change to a draft, which is not tracked. Returns whether anything changed."""
+        now = now or timezone.now()
+        update = []
+        changes = {}
+
+        if title is not None and title != self.title:
+            self.title = title
+            update.append("title")
+
+        if signals is not None:
+            buy, sell = self.signal_dicts(signals)
+            if not self._same_signals(self.buy_signals, buy):
+                changes["buy_signals"] = {"from": self.buy_signals, "to": buy}
+                self.buy_signals = buy
+                update.append("buy_signals")
+            if not self._same_signals(self.sell_signals, sell):
+                changes["sell_signals"] = {"from": self.sell_signals, "to": sell}
+                self.sell_signals = sell
+                update.append("sell_signals")
+
+        if exit_rules is not None and exit_rules != (self.exit_rules or {}):
+            changes["exit_rules"] = {"from": self.exit_rules or {}, "to": exit_rules}
+            self.exit_rules = exit_rules
+            update.append("exit_rules")
+
+        if changes and self.active:
+            self.rules_changed_at = now
+            self.baseline_strategy_return = self.strategy_return
+            self.baseline_asset_return = self.asset_return
+            self.edit_log = ([*self.edit_log, {"date": now.isoformat(), "changes": changes}])[-self.MAX_EDIT_LOG:]
+            update += ["rules_changed_at", "baseline_strategy_return", "baseline_asset_return", "edit_log"]
+
+        if update:
+            self.save(update_fields=update)
+        return bool(update)
 
     def combine_signals(self):
         """Method to combine buy and sell signals, convert to Signal dataclass, and store them."""
@@ -271,11 +348,15 @@ class Strategy(models.Model):
         self.exit_blocked = False
         self.strategy_return = 1
         self.asset_return = 1
+        self.rules_changed_at = None
+        self.baseline_strategy_return = self.baseline_asset_return = 1
+        self.edit_log = []
         self.last_processed_ts = None
         self.charge_user_date = get_thirty_days_away()
         self.started_at = timezone.now()
         self.save(update_fields=["active", "position", "strategy_return", "asset_return", "last_processed_ts",
-                                 "charge_user_date", "started_at", "entry_price", "peak_price", "exit_blocked"])
+                                 "charge_user_date", "started_at", "entry_price", "peak_price", "exit_blocked",
+                                 "rules_changed_at", "baseline_strategy_return", "baseline_asset_return", "edit_log"])
 
     def send_notifications(self, trade, message):
         """Record that `trade` owes the user a push, in the same transaction as the trade.
@@ -425,6 +506,29 @@ class PushDelivery(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=["notification", "device"], name="one_delivery_per_device")]
         indexes = [models.Index(fields=["status", "next_attempt_at"])]
+
+
+class SavedBacktest(models.Model):
+    """A finished backtest, kept for its owner. See saved_backtests.py for what is stored and why."""
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="saved_backtests")
+    created_at = models.DateTimeField(default=timezone.now)
+    label = models.CharField(max_length=60, blank=True, default="")
+    symbol = models.CharField(max_length=20)
+    interval = models.CharField(max_length=10)
+    requested_start = models.DateTimeField()
+    requested_end = models.DateTimeField()
+    covered_start = models.DateTimeField()  # what the market data actually covered (see DataWindow)
+    covered_end = models.DateTimeField()
+    buy_signals = models.JSONField(default=list)
+    sell_signals = models.JSONField(default=list)
+    exit_rules = models.JSONField(default=dict, blank=True)
+    next_candle_execution = models.BooleanField(default=False)
+    cost_percent = models.FloatField(default=0)
+    summary = models.JSONField(default=dict)  # the response's numbers, without the rows
+    series = models.JSONField(default=list)  # thinned rows: datetime, close, owned, return, exit_reason
+
+    class Meta:
+        indexes = [models.Index(fields=["user", "-id"])]
 
 
 #Not using it now but may use it later?

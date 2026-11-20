@@ -5,6 +5,10 @@ The rules (also in the README):
 
 * Only live results count, never backtests. A strategy's `strategy_return` and `asset_return` start at 1 on the day
   it begins running (`started_at`) and a draft starts when it is activated, so they already cover only that time.
+* Editing a tracked strategy's rules (its signals or exit rules) starts it over for the board: the 14 days and the 3
+  trades count from the edit, and the score counts only what it earned since (`baseline_*` hold the returns at the
+  edit). A board of live results must not reward tuning the rules after seeing how they did. Its history and its own
+  returns are kept on its own screen.
 * The score is the return over buy-and-hold: `strategy_return / asset_return`. Above 1 means the strategy beat
   simply holding the asset over the same period; 1.10 is 10% better.
 * A strategy ranks only if it is active, its owner is on the board, it has run for at least 14 days, and it has
@@ -38,11 +42,32 @@ def group_for(interval):
     return DAILY_OR_LONGER if info["seconds"] >= SECONDS_PER_DAY else INTRADAY
 
 
+def clock_start(strategy):
+    """When the board starts counting this strategy: when it began running, or when its rules last changed if later.
+    None when it is not known when it began (strategies from before that was recorded)."""
+    if strategy.started_at is None:
+        return None
+    changed = strategy.rules_changed_at
+    return changed if changed is not None and changed > strategy.started_at else strategy.started_at
+
+
+def board_returns(strategy):
+    """`(strategy_return, asset_return)` since the clock started, or `(None, None)` if they cannot be worked out. For a
+    strategy whose rules were never edited these are simply its returns."""
+    values = (strategy.strategy_return, strategy.asset_return, strategy.baseline_strategy_return,
+              strategy.baseline_asset_return)
+    if any(value is None for value in values) or strategy.baseline_strategy_return <= 0 or strategy.baseline_asset_return <= 0:
+        return None, None
+    return (Decimal(strategy.strategy_return) / Decimal(strategy.baseline_strategy_return),
+            Decimal(strategy.asset_return) / Decimal(strategy.baseline_asset_return))
+
+
 def completed_trades(strategy):
-    """Buys that have been closed by a sell, counted from when the strategy began running."""
+    """Buys that have been closed by a sell, counted from when the board started counting the strategy."""
     trades = strategy.trades.order_by("date", "pk")
-    if strategy.started_at is not None:
-        trades = trades.filter(date__gte=strategy.started_at)
+    start = clock_start(strategy)
+    if start is not None:
+        trades = trades.filter(date__gte=start)
     holding = False
     count = 0
     for trade in trades:
@@ -65,9 +90,10 @@ def ineligible_reason(strategy, now=None):
         return "unknown_interval"
     if strategy.started_at is None:
         return "start_unknown"  # strategies from before this was recorded; their returns cannot be dated
-    if now - strategy.started_at < timedelta(days=MIN_LIVE_DAYS):
+    if now - clock_start(strategy) < timedelta(days=MIN_LIVE_DAYS):
         return "too_new"
-    if strategy.asset_return is None or strategy.asset_return <= 0 or strategy.strategy_return is None:
+    since_strategy, since_asset = board_returns(strategy)
+    if since_strategy is None or since_asset is None or since_asset <= 0:
         return "no_valid_return"
     if completed_trades(strategy) < MIN_COMPLETED_TRADES:
         return "too_few_trades"
@@ -75,8 +101,9 @@ def ineligible_reason(strategy, now=None):
 
 
 def score(strategy):
-    """Return over buy-and-hold, rounded to four places. Call only for an eligible strategy."""
-    return (Decimal(strategy.strategy_return) / Decimal(strategy.asset_return)).quantize(SCORE_PLACES)
+    """Return over buy-and-hold since the clock started, rounded to four places. Call only for an eligible strategy."""
+    since_strategy, since_asset = board_returns(strategy)
+    return (since_strategy / since_asset).quantize(SCORE_PLACES)
 
 
 def rank_scores(rows):

@@ -4,7 +4,9 @@ from django.contrib.auth import authenticate
 from api.exit_rules import LIMITS, STOP_LOSS, TAKE_PROFIT, TRAILING_STOP
 from api.indicators.signal import CURRENT_VERSION, LEGACY_VERSION
 from api.models import CreditTransaction, CustomUser, Notification, Strategy, Trade
+from api.services.card_service import equity_points
 from django.conf import settings
+from django.db.models import prefetch_related_objects
 import math
 
 PROMO_CODES = settings.PROMO_CODES
@@ -57,6 +59,15 @@ class ExitRulesSerializer(serializers.Serializer):
                                            max_value=LIMITS[TRAILING_STOP][1])
     take_profit = serializers.FloatField(required=False, allow_null=True, min_value=0, max_value=LIMITS[TAKE_PROFIT][1])
 
+    def to_internal_value(self, data):
+        # A name this does not know is refused, not dropped: dropped, a typo would read as "no rules", and on an edit it
+        # would clear the exit rules the strategy has.
+        if isinstance(data, dict):
+            unknown = sorted(set(data) - set(self.fields))
+            if unknown:
+                raise serializers.ValidationError({unknown[0]: "Not an exit rule. Use stop_loss, trailing_stop or take_profit."})
+        return super().to_internal_value(data)
+
     def validate(self, attrs):
         rules = {}
         for name, value in attrs.items():
@@ -86,16 +97,30 @@ class StrategySerializer(serializers.ModelSerializer):
     buy_signals = serializers.JSONField()
     sell_signals = serializers.JSONField()
     exit_rules = serializers.JSONField(read_only=True)
+    # When the rules were last edited, and the last few edits (what changed, from and to). Empty for a strategy never edited.
+    edits = serializers.JSONField(source='edit_log', read_only=True)
     trades = TradeSerializer(many=True, read_only=True)
+    equity_curve = serializers.SerializerMethodField()
+
+    def get_equity_curve(self, strategy):
+        """The strategy's value over time, from the same function the share card draws from (`equity_points`), so the
+        screen and the card cannot disagree. Points are `{"date", "multiple"}`, the multiple starting at 1.0 on the
+        first buy; empty until there is a finished round trip or an open position to draw."""
+        trades = sorted(strategy.trades.all(), key=lambda trade: (trade.date, trade.pk))  # uses a prefetch if there is one
+        return [{"date": moment, "multiple": multiple}
+                for moment, multiple in equity_points(trades, strategy.strategy_return)]
 
     def to_representation(self, instance):
+        # The trades are used twice (the list and the curve); load them once. Does nothing if already prefetched.
+        prefetch_related_objects([instance], "trades")
         return with_signal_versions(super().to_representation(instance))
 
     class Meta:
         model = Strategy
         fields = [
             'id', 'title', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'exit_rules', 'strategy_return',
-            'asset_return', 'position', 'charge_user_date', 'active', 'last_processed_ts', 'trades'
+            'asset_return', 'position', 'charge_user_date', 'active', 'last_processed_ts', 'rules_changed_at', 'edits', 'trades',
+            'equity_curve'
         ]
         read_only_fields = ['last_processed_ts']  # the live job sets it: the open time (Unix seconds) of the newest candle checked
 
@@ -107,7 +132,7 @@ class SharedStrategySerializer(serializers.ModelSerializer):
     class Meta:
         model = Strategy
         fields = ['title', 'symbol', 'interval', 'buy_signals', 'sell_signals', 'exit_rules', 'strategy_return',
-                  'asset_return']
+                  'asset_return', 'rules_changed_at']
         read_only_fields = fields
 
     def to_representation(self, instance):
@@ -211,6 +236,28 @@ class BacktestRequestSerializer(serializers.Serializer):
     next_candle_execution = serializers.BooleanField(required=False, default=False)
 
     def validate_signals(self, signals):
+        return one_version(signals)
+
+
+class StrategyEditSerializer(serializers.Serializer):
+    """What may be changed on a strategy that exists: its title, signals and exit rules, checked as on create. The symbol and
+    the candle interval are not editable (a different market is a different strategy, and the interval sets the charge).
+    Every field is optional; an empty edit is refused."""
+    title = serializers.CharField(max_length=50, required=False)
+    signals = SignalSerializer(many=True, required=False)
+    exit_rules = ExitRulesSerializer(required=False)
+
+    def validate(self, attrs):
+        for field in ("symbol", "interval"):
+            if field in self.initial_data:
+                raise serializers.ValidationError({field: f"The {field} of a strategy cannot be changed. Start a new strategy instead."})
+        if not attrs:
+            raise serializers.ValidationError("Send at least one of title, signals or exit_rules to change.")
+        return attrs
+
+    def validate_signals(self, signals):
+        if not any(signal["buy_signal"] for signal in signals):
+            raise serializers.ValidationError("A strategy needs at least one buy signal")
         return one_version(signals)
 
 

@@ -10,13 +10,15 @@ How the boards are made:
   return over that week divided by the asset's, taken from its snapshot at the start of the week and at the end. A
   strategy with no snapshot at the start (it, or its owner, joined during the week) has no weekly result and ranks
   from the next week. The week is then final.
-* **All-time board.** Rewritten on every run from each strategy's current cumulative returns, which already
-  cover only live running since `started_at`.
+* **All-time board.** Rewritten on every run from each strategy's returns since the board started counting it, which
+  is since `started_at`, or since its rules last changed if later (`rules.board_returns`).
+* **Edited strategies.** A strategy whose rules were edited during a week has no result for that week, because it
+  would blend two sets of rules; it ranks from the next week.
 
 Eligibility, scoring, groups, one entry per person and ties all come from `api.leaderboard_rules`.
 """
 import logging
-from datetime import timedelta, timezone as dt_timezone
+from datetime import datetime, time, timedelta, timezone as dt_timezone
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
@@ -82,6 +84,8 @@ def publish_week(week, boundary, now):
                     continue
                 if rules.ineligible_reason(strategy, now) is not None:
                     continue
+                if strategy.rules_changed_at is not None and strategy.rules_changed_at >= datetime.combine(week, time.min, dt_timezone.utc):
+                    continue  # its rules changed this week
                 strategy_return = Decimal(end.strategy_return) / Decimal(begin.strategy_return)
                 asset_return = Decimal(end.asset_return) / Decimal(begin.asset_return)
                 if asset_return <= 0:
@@ -99,7 +103,8 @@ def refresh_all_time(now):
     now = now or timezone.now()
     for strategy in on_board_strategies():
         if rules.ineligible_reason(strategy, now) is None:
-            candidates.append((strategy, rules.score(strategy), strategy.strategy_return, strategy.asset_return))
+            since_strategy, since_asset = rules.board_returns(strategy)
+            candidates.append((strategy, rules.score(strategy), since_strategy, since_asset))
     with transaction.atomic():
         LeaderboardEntry.objects.filter(kind=LeaderboardEntry.ALL_TIME).delete()
         return _write_board(LeaderboardEntry.ALL_TIME, None, candidates)

@@ -9,7 +9,7 @@ from api.tests.test_live_pipeline import DAY, INTERVAL, SYMBOL, LivePipelineCase
 from api.tests.test_strategy import make_strategy, make_user
 
 PUBLIC_FIELDS = {"title", "symbol", "interval", "buy_signals", "sell_signals", "exit_rules", "strategy_return",
-                 "asset_return"}
+                 "asset_return", "rules_changed_at"}
 
 
 class ShareTestCase(APITestCase):
