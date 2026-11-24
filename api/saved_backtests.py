@@ -6,9 +6,10 @@ series of rows: enough for the app to draw the same chart and mark the same trad
 of every candle. The thinning keeps every candle where the position changed or a rule sold, so the trades read back
 exactly, and it keeps each stretch's highest and lowest points so a spike is never averaged away.
 """
-import dataclasses
 
 from django.db import transaction
+
+from api.indicators.signal import signal_dict
 
 MAX_SAVED = 50  # per user; the oldest are dropped when a new one is saved
 MAX_ROWS = 800  # about this many rows are kept per saved run (a little over when there are many trades)
@@ -74,8 +75,8 @@ def save(user, *, symbol, interval, start_date, end_date, signals, exit_rules, d
 
     rows = [_row(row) for row in response["result"]]
     window = response["data_window"]
-    buy = [dataclasses.asdict(s) for s in signals if s.buy_signal]
-    sell = [dataclasses.asdict(s) for s in signals if not s.buy_signal]
+    buy = [signal_dict(s) for s in signals if s.buy_signal]
+    sell = [signal_dict(s) for s in signals if not s.buy_signal]
     with transaction.atomic():
         saved = SavedBacktest.objects.create(
             user=user, symbol=symbol, interval=interval, requested_start=start_date, requested_end=end_date,

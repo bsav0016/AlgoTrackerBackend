@@ -57,12 +57,21 @@ def equity_points(trades, strategy_return, now=None):
     return points if len(points) >= 2 else []
 
 
-def describe_signal(signal):
-    """One rule as a short line, e.g. `RSI(14) > 70`."""
-    windows = [signal.get(key) for key in ("window", "fast_window", "slow_window", "signal_window")]
+def _indicator_text(indicator):
+    """An indicator and its windows, e.g. `RSI(14)`."""
+    windows = [indicator.get(key) for key in ("window", "fast_window", "slow_window", "signal_window")]
     args = ",".join(str(w) for w in windows if w)
-    name = f"{signal.get('name', '?')}({args})" if args else str(signal.get("name", "?"))
-    return f"{name} {'>' if signal.get('above_target') else '<'} {signal.get('target_value')}"
+    return f"{indicator.get('name', '?')}({args})" if args else str(indicator.get("name", "?"))
+
+
+def describe_signal(signal):
+    """One rule as a short line, e.g. `RSI(14) > 70`, or `SMA_PRICE(20) > SMA_PRICE(50)` for a rule that compares two
+    indicators."""
+    sign = '>' if signal.get('above_target') else '<'
+    other = signal.get('compare_to')
+    if other:
+        return f"{_indicator_text(signal)} {sign} {_indicator_text(other)}"
+    return f"{_indicator_text(signal)} {sign} {signal.get('target_value')}"
 
 
 def _percent(multiple):
