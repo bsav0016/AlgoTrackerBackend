@@ -5,7 +5,7 @@ import math
 import pandas as pd
 from asgiref.sync import async_to_sync
 
-from api.indicators.signal import Signal
+from api.indicators.signal import Signal, signal_dict
 from api.models import Strategy, Trade
 from api.redis_manager import RedisManager
 from api.services.backtest_service import BacktestService
@@ -64,6 +64,9 @@ class LiveBacktestParityTests(LivePipelineCase):
         prices = series()
         buy_below, sell_above = self.thresholds(name, windows, prices)
         signals = [signal(name, True, buy_below, **windows), signal(name, False, sell_above, **windows)]
+        self.run_signals_parity(name, prices, signals)
+
+    def run_signals_parity(self, name, prices, signals):
         expected = self.backtest(prices, signals)
 
         for _, row in prices.iloc[:HISTORY].iterrows():
@@ -71,7 +74,8 @@ class LiveBacktestParityTests(LivePipelineCase):
                 SYMBOL, INTERVAL, row["close"], int(row["timestamp"]), high=row["high"], low=row["low"])
         strategy = Strategy.objects.create(
             user=self.user, title=name, symbol=SYMBOL, interval=INTERVAL, position=1,
-            buy_signals=[{**vars(signals[0])}], sell_signals=[{**vars(signals[1])}])
+            buy_signals=[signal_dict(sig) for sig in signals if sig.buy_signal],
+            sell_signals=[signal_dict(sig) for sig in signals if not sig.buy_signal])
 
         for offset, (_, row) in enumerate(prices.iloc[HISTORY:].iterrows(), start=1):
             async_to_sync(RedisManager.store_close_price)(
@@ -111,3 +115,24 @@ class LiveBacktestParityTests(LivePipelineCase):
 
     def test_adx(self):
         self.run_parity("ADX")
+
+    # Rules that compare two indicators with each other must follow the same path in a backtest and in the live job.
+
+    def test_sma_crossover(self):
+        compare = {"name": "SMA_PRICE", "window": 15}
+        self.run_signals_parity("SMA crossover", series(), [
+            Signal("SMA_PRICE", True, True, 0, window=5, compare_to=compare),
+            Signal("SMA_PRICE", False, False, 0, window=5, compare_to=compare)])
+
+    def test_a_fast_ema_crossing_a_slow_sma(self):
+        compare = {"name": "SMA_PRICE", "window": 20}
+        self.run_signals_parity("EMA over SMA", series(), [
+            Signal("EMA_PRICE", True, True, 0, window=4, compare_to=compare),
+            Signal("EMA_PRICE", False, False, 0, window=4, compare_to=compare)])
+
+    def test_a_crossover_that_must_also_pass_an_ordinary_rule(self):
+        compare = {"name": "SMA_PRICE", "window": 12}
+        self.run_signals_parity("crossover and RSI", series(), [
+            Signal("SMA_PRICE", True, True, 0, window=4, compare_to=compare),
+            Signal("RSI", False, True, 75, window=5),
+            Signal("SMA_PRICE", False, False, 0, window=4, compare_to=compare)])
