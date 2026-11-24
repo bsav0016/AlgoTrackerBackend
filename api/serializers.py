@@ -20,11 +20,20 @@ class TradeSerializer(serializers.ModelSerializer):
         fields = ['id', 'date', 'price', 'is_buy', 'exit_reason']
 
 
+class ComparisonSerializer(serializers.Serializer):
+    """The second indicator of a rule that compares two indicators with each other."""
+    name = serializers.CharField(max_length=100)
+    window = serializers.IntegerField()
+
+
 class SignalSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=100)
     above_target = serializers.BooleanField()
     buy_signal = serializers.BooleanField()
-    target_value = serializers.FloatField()
+    # Required unless the rule has `compare_to`; then it is ignored and stored as 0.
+    target_value = serializers.FloatField(required=False)
+    # Compare the indicator with a second one instead of a number: {"name": "SMA_PRICE", "window": 50}.
+    compare_to = ComparisonSerializer(required=False, allow_null=True)
     window = serializers.IntegerField(required=False, allow_null=True)
     fast_window = serializers.IntegerField(required=False, allow_null=True)
     slow_window = serializers.IntegerField(required=False, allow_null=True)
@@ -35,7 +44,13 @@ class SignalSerializer(serializers.Serializer):
     SIGNAL_WINDOWS = {
         "RSI": ("window",), "SMA": ("window",), "EMA": ("window",), "SO": ("window",), "BBP": ("window",),
         "ADX": ("window",), "MACD": ("fast_window", "slow_window", "signal_window"),
+        "SMA_PRICE": ("window",), "EMA_PRICE": ("window",),
     }
+    # Which indicators a rule may be compared with, by the indicator it starts from. Only indicators on the same scale
+    # can be compared: a price average with a price average. (An oscillator from 0 to 100 against a price means
+    # nothing.) The price averages exist only for this; they cannot be compared with a typed number, because a price
+    # level differs for every market.
+    COMPARISONS = {"SMA_PRICE": ("SMA_PRICE", "EMA_PRICE"), "EMA_PRICE": ("SMA_PRICE", "EMA_PRICE")}
     MAX_WINDOW = 500  # live strategies see at most the last 500 candles
 
     def validate(self, attrs):
@@ -47,8 +62,29 @@ class SignalSerializer(serializers.Serializer):
             if value is None or not 1 <= value <= self.MAX_WINDOW:
                 raise serializers.ValidationError(
                     {field: f"{attrs['name']} needs {field} between 1 and {self.MAX_WINDOW}"})
-        if not math.isfinite(attrs["target_value"]):
-            raise serializers.ValidationError({"target_value": "Target value must be a finite number"})
+        compare = attrs.pop("compare_to", None)
+        if compare is None:
+            if attrs["name"] in self.COMPARISONS:
+                raise serializers.ValidationError(
+                    {"compare_to": f"{attrs['name']} is compared with another average: send compare_to"})
+            if "target_value" not in attrs:
+                raise serializers.ValidationError({"target_value": "This field is required."})
+            if not math.isfinite(attrs["target_value"]):
+                raise serializers.ValidationError({"target_value": "Target value must be a finite number"})
+            return attrs
+        allowed = self.COMPARISONS.get(attrs["name"])
+        if allowed is None:
+            raise serializers.ValidationError({"compare_to": f"{attrs['name']} cannot be compared with another indicator"})
+        if compare["name"] not in allowed:
+            raise serializers.ValidationError(
+                {"compare_to": f"{attrs['name']} can only be compared with {' or '.join(allowed)}"})
+        if not 1 <= compare["window"] <= self.MAX_WINDOW:
+            raise serializers.ValidationError(
+                {"compare_to": f"{compare['name']} needs window between 1 and {self.MAX_WINDOW}"})
+        if compare["name"] == attrs["name"] and compare["window"] == attrs["window"]:
+            raise serializers.ValidationError({"compare_to": "An average cannot be compared with itself; pick a different one"})
+        attrs["compare_to"] = {"name": compare["name"], "window": compare["window"]}
+        attrs["target_value"] = 0.0  # unused for a comparison; stored so older readers still find the field
         return attrs
 
 

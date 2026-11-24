@@ -5,7 +5,7 @@ from django.dispatch import receiver
 from django.conf import settings
 from django.contrib.auth.models import BaseUserManager, AbstractBaseUser, PermissionsMixin, Permission, Group
 from django.utils.translation import gettext_lazy as _
-from api.indicators.signal import Signal, LEGACY_VERSION
+from api.indicators.signal import Signal, LEGACY_VERSION, signal_dict
 from typing import List
 from api.exit_rules import BUY, LABELS, SELL, PositionState, advance
 from api.services.signal_service import SignalService
@@ -159,17 +159,7 @@ class Strategy(models.Model):
         updated_sell_signals = []
 
         for signal in signals:
-            signal_data = {
-                "name": signal.name,
-                "above_target": signal.above_target,
-                "buy_signal": signal.buy_signal,
-                "target_value": signal.target_value,
-                "window": signal.window,
-                "fast_window": signal.fast_window,
-                "slow_window": signal.slow_window,
-                "signal_window": signal.signal_window,
-                "version": signal.version,
-            }
+            signal_data = signal_dict(signal)
 
             if signal.buy_signal:
                 updated_buy_signals.append(signal_data)
@@ -187,20 +177,18 @@ class Strategy(models.Model):
         """The stored form of a list of signals: (buy signals, sell signals), one dict each."""
         buy, sell = [], []
         for signal in signals:
-            data = {
-                "name": signal.name, "above_target": signal.above_target, "buy_signal": signal.buy_signal,
-                "target_value": signal.target_value, "window": signal.window, "fast_window": signal.fast_window,
-                "slow_window": signal.slow_window, "signal_window": signal.signal_window, "version": signal.version,
-            }
-            (buy if signal.buy_signal else sell).append(data)
+            (buy if signal.buy_signal else sell).append(signal_dict(signal))
         return buy, sell
 
     @staticmethod
     def _same_signals(stored, new):
         """Whether two lists of signals do the same thing: order does not matter (they are all required at once), and a
         signal stored before versions existed is version 1."""
-        key = lambda items: sorted(json.dumps({**item, "version": item.get("version", LEGACY_VERSION)}, sort_keys=True)
-                                   for item in items)
+        # A rule with no `compare_to` and one stored as null are the same rule.
+        key = lambda items: sorted(
+            json.dumps({**{k: v for k, v in item.items() if not (k == "compare_to" and v is None)},
+                        "version": item.get("version", LEGACY_VERSION)}, sort_keys=True)
+            for item in items)
         return key(stored) == key(new)
 
     def apply_edit(self, title=None, signals=None, exit_rules=None, now=None):
@@ -261,6 +249,7 @@ class Strategy(models.Model):
                 slow_window=signal.get('slow_window'),
                 signal_window=signal.get('signal_window'),
                 version=signal.get('version', LEGACY_VERSION),  # saved before versions existed: the original definitions
+                compare_to=signal.get('compare_to'),
             )
             for signal in self.buy_signals
         ]
@@ -276,6 +265,7 @@ class Strategy(models.Model):
                 slow_window=signal.get('slow_window'),
                 signal_window=signal.get('signal_window'),
                 version=signal.get('version', LEGACY_VERSION),  # saved before versions existed: the original definitions
+                compare_to=signal.get('compare_to'),
             )
             for signal in self.sell_signals
         ]

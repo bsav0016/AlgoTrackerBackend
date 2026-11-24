@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Optional
 
 # Indicator definitions. 1 is the original RSI, ADX and MACD value, kept so strategies saved before the standard
@@ -37,6 +37,15 @@ def comparison_signal(signal: Signal) -> Optional[Signal]:
     fields = {key: signal.compare_to.get(key) for key in COMPARE_TO_KEYS}
     return Signal(above_target=signal.above_target, buy_signal=signal.buy_signal, target_value=0,
                   version=signal.version, **fields)
+
+
+def signal_dict(signal: Signal) -> dict:
+    """The stored form of a rule. `compare_to` is left out when there is none, so a rule that compares with a typed
+    number is stored exactly as it always was (an edit that changes nothing must not look like a change)."""
+    data = asdict(signal)
+    if data.get("compare_to") is None:
+        data.pop("compare_to", None)
+    return data
 
 
 def indicator_signals(signals):
