@@ -2,7 +2,7 @@ from django.conf import settings
 import requests
 from api.services.signal_service import SignalService
 import pandas as pd
-from api.indicators.signal import Signal
+from api.indicators.signal import Signal, comparison_signal, indicator_signals
 import datetime
 import math
 from typing import List
@@ -72,11 +72,12 @@ class BacktestService:
         Indicators that smooth recursively (RSI, ADX, EMA, MACD) keep a memory of the early data, so they get
         several windows to settle; plain windows need just their length."""
         needed = 0
-        for signal in signals:
+        # A rule compared with a second indicator needs that one settled too, and it is often the slower of the two.
+        for signal in indicator_signals(signals):
             window = signal.window or 0
-            if signal.name in ("SMA", "BBP", "SO"):
+            if signal.name in ("SMA", "BBP", "SO", "SMA_PRICE"):
                 needed = max(needed, window)
-            elif signal.name in ("RSI", "EMA"):
+            elif signal.name in ("RSI", "EMA", "EMA_PRICE"):
                 needed = max(needed, 4 * window)
             elif signal.name == "ADX":
                 needed = max(needed, 6 * window)
@@ -187,16 +188,23 @@ class BacktestService:
         return f"{signal.name}_{signal.window}"
 
     @staticmethod
+    def rule_holds(data: pd.DataFrame, signal: Signal) -> pd.Series:
+        """Whether a rule is true on each row. The one place a rule is evaluated, so a backtest and a live strategy
+        cannot disagree: the indicator is compared with the rule's typed number, or with a second indicator when it
+        has `compare_to`. A row where either side has no value yet (a window not filled) is false."""
+        left = data[BacktestService.indicator_column(signal)]
+        other = comparison_signal(signal)
+        right = data[BacktestService.indicator_column(other)] if other is not None else signal.target_value
+        return left > right if signal.above_target else left < right
+
+    @staticmethod
     def find_buys(data: pd.DataFrame, signals: List[Signal]) -> pd.DataFrame:
         new_data = data.copy()
         new_data["buy"] = True
         #Add indicator data here
         for signal in signals:
             if signal.buy_signal:
-                indicator_column = BacktestService.indicator_column(signal)
-                condition = new_data[indicator_column] > signal.target_value if signal.above_target else (
-                        new_data[indicator_column] < signal.target_value)
-                new_data["buy"] = new_data["buy"] & condition
+                new_data["buy"] = new_data["buy"] & BacktestService.rule_holds(new_data, signal)
         return new_data
 
     @staticmethod
@@ -208,10 +216,7 @@ class BacktestService:
         new_data["sell"] = bool(sell_signals)
         for signal in signals:
             if not signal.buy_signal:
-                indicator_column = BacktestService.indicator_column(signal)
-                condition = new_data[indicator_column] > signal.target_value if signal.above_target else (
-                        new_data[indicator_column] < signal.target_value)
-                new_data["sell"] = new_data["sell"] & condition
+                new_data["sell"] = new_data["sell"] & BacktestService.rule_holds(new_data, signal)
         return new_data
 
     @staticmethod
